@@ -47,6 +47,7 @@ public class CompressorPlugin implements IPlugIn {
   @Override
   public void connect(IPlugInPort plugInPort) {
     swingUI.injectMenuAction(null, EDIT_TITLE);
+    swingUI.injectMenuAction(new CompressAction(plugInPort, swingUI), EDIT_TITLE);
     swingUI.injectMenuAction(new CompressLayoutAction(plugInPort, swingUI), EDIT_TITLE);
   }
 
