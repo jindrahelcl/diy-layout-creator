@@ -81,4 +81,40 @@ public class GridModelTests {
 
     assertEquals(new Rectangle(5, 5, 3, 0), model.occupiedBounds());
   }
+
+  @Test
+  public void wireRunsClaimEdgesAndHolesPerNet() {
+    GridModel model = new GridModel();
+    // net 0 runs horizontally through (2,2)..(4,2)
+    model.claimRun(0, java.util.List.of(new Cell(2, 2), new Cell(3, 2), new Cell(4, 2)));
+
+    // same net may reuse its edges and holes; a foreign net may not
+    assertTrue(model.canUseEdge(0, new Cell(2, 2), new Cell(3, 2)));
+    assertFalse(model.canUseEdge(1, new Cell(2, 2), new Cell(3, 2)));
+    assertFalse(model.canUseEdge(1, new Cell(3, 2), new Cell(2, 2)));
+    assertTrue(model.canPassHole(0, new Cell(3, 2)));
+    assertFalse(model.canPassHole(1, new Cell(3, 2)));
+
+    // an edge crossing the run's holes is free, only the hole blocks
+    assertTrue(model.canUseEdge(1, new Cell(3, 1), new Cell(3, 2)));
+
+    model.releaseNet(0);
+    assertTrue(model.canUseEdge(1, new Cell(2, 2), new Cell(3, 2)));
+    assertTrue(model.canPassHole(1, new Cell(3, 2)));
+  }
+
+  @Test
+  public void pinsBlockForeignRuns() {
+    GridModel model = new GridModel();
+    Resistor resistor = new Resistor();
+    model.occupyPin(new Cell(5, 5), resistor, 0);
+    model.occupyPin(new Cell(6, 5), resistor, 1);
+    model.setPinNet(new Cell(5, 5), 0);
+
+    assertTrue(model.canPassHole(0, new Cell(5, 5)));
+    assertFalse(model.canPassHole(1, new Cell(5, 5)));
+    // pin without net assignment blocks every run
+    assertFalse(model.canPassHole(0, new Cell(6, 5)));
+    assertFalse(model.canPassHole(1, new Cell(6, 5)));
+  }
 }

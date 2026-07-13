@@ -55,9 +55,22 @@ public class GridModel {
   public record Pin(IDIYComponent<?> component, int pointIndex) {
   }
 
+  /** An undirected lattice edge between two orthogonally adjacent cells. */
+  public record Edge(Cell a, Cell b) {
+    public static Edge between(Cell c1, Cell c2) {
+      if (c1.col() < c2.col() || (c1.col() == c2.col() && c1.row() <= c2.row())) {
+        return new Edge(c1, c2);
+      }
+      return new Edge(c2, c1);
+    }
+  }
+
   private final Map<Cell, List<Pin>> pins = new HashMap<Cell, List<Pin>>();
   private final Map<Cell, Set<IDIYComponent<?>>> bodies =
       new HashMap<Cell, Set<IDIYComponent<?>>>();
+  private final Map<Cell, Integer> pinNets = new HashMap<Cell, Integer>();
+  private final Map<Edge, Integer> wireEdges = new HashMap<Edge, Integer>();
+  private final Map<Cell, Integer> wireHoles = new HashMap<Cell, Integer>();
 
   public static Cell snap(Point2D point) {
     return new Cell((int) Math.round(point.getX() / CELL_SIZE_PX),
@@ -92,7 +105,55 @@ public class GridModel {
   }
 
   public boolean isFree(Cell cell) {
-    return pinsAt(cell).isEmpty() && bodiesAt(cell).isEmpty();
+    return pinsAt(cell).isEmpty() && bodiesAt(cell).isEmpty() && !wireHoles.containsKey(cell);
+  }
+
+  public void setPinNet(Cell cell, int netId) {
+    pinNets.put(cell, netId);
+  }
+
+  /** Net the pin at this cell belongs to, or null for no pin / unassigned pin. */
+  public Integer pinNetAt(Cell cell) {
+    return pinNets.get(cell);
+  }
+
+  /** True if an underside run of the given net may traverse this lattice edge. */
+  public boolean canUseEdge(int netId, Cell from, Cell to) {
+    Integer owner = wireEdges.get(Edge.between(from, to));
+    return owner == null || owner == netId;
+  }
+
+  /**
+   * True if an underside run of the given net may pass through this hole: bare wire shorts
+   * against pins and runs of other nets (and pins with no net assigned).
+   */
+  public boolean canPassHole(int netId, Cell cell) {
+    Integer pinNet = pinNets.get(cell);
+    if (pinNet != null) {
+      if (pinNet != netId) {
+        return false;
+      }
+    } else if (!pinsAt(cell).isEmpty()) {
+      return false;
+    }
+    Integer wireNet = wireHoles.get(cell);
+    return wireNet == null || wireNet == netId;
+  }
+
+  /** Claims all edges and holes along the path (a sequence of adjacent cells) for the net. */
+  public void claimRun(int netId, List<Cell> path) {
+    for (int i = 0; i < path.size(); i++) {
+      wireHoles.put(path.get(i), netId);
+      if (i > 0) {
+        wireEdges.put(Edge.between(path.get(i - 1), path.get(i)), netId);
+      }
+    }
+  }
+
+  /** Releases every wire claim of the net (pins stay); used for rip-up & reroute. */
+  public void releaseNet(int netId) {
+    wireEdges.values().removeIf((v) -> v == netId);
+    wireHoles.values().removeIf((v) -> v == netId);
   }
 
   /** Bounding box of all occupied cells in cell coordinates, or null if nothing is occupied. */
@@ -102,6 +163,9 @@ public class GridModel {
       bounds = include(bounds, cell);
     }
     for (Cell cell : bodies.keySet()) {
+      bounds = include(bounds, cell);
+    }
+    for (Cell cell : wireHoles.keySet()) {
       bounds = include(bounds, cell);
     }
     return bounds;

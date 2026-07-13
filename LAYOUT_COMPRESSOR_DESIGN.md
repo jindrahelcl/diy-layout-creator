@@ -212,9 +212,22 @@ Each milestone builds, passes existing tests, and is demoable. Sizes are rough.
 
   *Accept:* footprints correct for the common component families (leaded passives, DIL, TO-92,
   board-mounted); off-grid parts detected.
-- **M2 — Router (large).** A* + multi-terminal + rip-up/reroute + jumper fallback on
-  `GridModel`, with synthetic-fixture tests. *Accept:* fixture suite passes; crossing-pair
-  fixture yields exactly one jumper.
+- **M2 — Router (large).** Five committable steps:
+  - **M2.1 — Wire occupancy:** `GridModel` gains net-aware wire state — underside runs claim
+    lattice edges and every hole they pass through (bare wire shorts against foreign pins and
+    runs); per-net release enables rip-up; pin→net assignment.
+  - **M2.2 — Single-net A*:** cheapest underside path from a cell to a set of target cells;
+    integer costs (step + turn penalty), direction-aware search states, board bounds,
+    deterministic tie-breaking.
+  - **M2.3 — Multi-terminal nets:** closest pin pair first, then each remaining pin to the
+    nearest cell of the growing route tree (cheap Steiner approximation); `RoutedNet` result.
+  - **M2.4 — Whole-board routing:** net ordering, route all nets; a pin that can't reach its
+    tree on the underside gets a top-side insulated jumper (always succeeds).
+  - **M2.5 — Rip-up & reroute:** before accepting a jumper, rip up to K=3 blocking nets and
+    retry, keep the cheaper outcome; routing metrics (wire length, jumper count).
+
+  *Accept:* fixture suite passes; two nets forced to cross on a bounded board yield exactly
+  one jumper; parallel nets yield zero.
 - **M3 — Normalization end-to-end (large).** Seeder + legalizer + route-all + `LayoutEmitter` +
   verification + `applyEditor` wiring. First real "Compress Layout (rough)" button.
   *Accept:* ≥ 5 perfboard-suitable regression projects compress with netlist equality; undo
