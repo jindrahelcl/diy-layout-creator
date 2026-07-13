@@ -119,6 +119,20 @@ public class CompressLayoutAction extends AbstractAction {
           .append(" &mdash; these stay in place and get connected by wires");
     }
     sb.append(".</p>");
+    sb.append("<h3>Routing dry-run</h3>");
+    if (survey.getRouting() == null) {
+      sb.append("<p>Nothing to route.</p>");
+    } else {
+      sb.append("<p>At the current placement, the router would need <b>")
+          .append(survey.getRouting().getTotalWireLength())
+          .append("</b> wire steps on the underside and <b>")
+          .append(survey.getRouting().getJumperCount()).append("</b> top-side jumpers");
+      if (survey.getSkippedRoutingPins() > 0) {
+        sb.append(" (").append(survey.getSkippedRoutingPins())
+            .append(" off-grid pins skipped in the estimate)");
+      }
+      sb.append(". Estimate only &mdash; existing wiring is ignored and nothing is moved.</p>");
+    }
     sb.append("</body></html>");
     return sb.toString();
   }

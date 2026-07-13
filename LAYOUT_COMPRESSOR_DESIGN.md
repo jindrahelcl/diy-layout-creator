@@ -230,6 +230,8 @@ Each milestone builds, passes existing tests, and is demoable. Sizes are rough.
   one jumper; parallel nets yield zero.
 - **M3 — Normalization end-to-end (large).** Seeder + legalizer + route-all + `LayoutEmitter` +
   verification + `applyEditor` wiring. First real "Compress Layout (rough)" button.
+  *(M3.0, done early: the preview dialog runs a routing dry-run at the current placement —
+  wire length + jumper estimate on real projects, existing wiring ignored.)*
   *Accept:* ≥ 5 perfboard-suitable regression projects compress with netlist equality; undo
   restores the original exactly.
 - **M4 — Compression loop (large).** Move catalogue + incremental reroute + annealer + time

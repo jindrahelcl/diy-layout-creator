@@ -21,16 +21,23 @@
 */
 package org.diylc.editor.compressor;
 
+import java.awt.Rectangle;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.diylc.core.IDIYComponent;
 import org.diylc.core.Project;
+import org.diylc.editor.compressor.GridModel.Cell;
 import org.diylc.presenter.ContinuityArea;
 import org.diylc.netlist.Group;
+import org.diylc.netlist.Node;
 
 /**
  * Summary of what the layout compressor would operate on: component classification plus net and
@@ -40,10 +47,15 @@ import org.diylc.netlist.Group;
  */
 public class CompressionSurvey {
 
+  /** Extra routable space around the current placement, in cells. */
+  private static final int DRY_RUN_MARGIN = 2;
+
   private final ComponentClassifier.Classification classification;
   private final List<Group> nets;
   private final List<Footprint> footprints;
   private final int stickyPinCount;
+  private RoutingResult routing;
+  private int skippedRoutingPins;
 
   private CompressionSurvey(ComponentClassifier.Classification classification, List<Group> nets,
       List<Footprint> footprints, int stickyPinCount) {
@@ -78,7 +90,54 @@ public class CompressionSurvey {
       stickyPinCount += footprint.getPinCount();
     }
 
-    return new CompressionSurvey(classification, nets, footprints, stickyPinCount);
+    CompressionSurvey survey =
+        new CompressionSurvey(classification, nets, footprints, stickyPinCount);
+    survey.dryRunRouting();
+    return survey;
+  }
+
+  /**
+   * Routes the nets at the current placement on an otherwise empty board: pins snapped to the
+   * grid, existing wiring ignored (it's what routing replaces). Estimates the wire length and
+   * jumper count the compressor would need without moving anything.
+   */
+  private void dryRunRouting() {
+    GridModel grid = new GridModel();
+    for (IDIYComponent<?> c : classification.getRealParts()) {
+      for (int i = 0; i < c.getControlPointCount(); i++) {
+        if (c.isControlPointSticky(i)) {
+          grid.occupyPin(GridModel.snap(c.getControlPoint(i)), c, i);
+        }
+      }
+    }
+
+    // snapping can collapse distinct pins onto one cell (off-grid pitches); a cell can only
+    // belong to one net, so later claims are skipped and reported
+    List<List<Cell>> netCells = new ArrayList<List<Cell>>();
+    Map<Cell, Integer> cellOwner = new HashMap<Cell, Integer>();
+    for (int netId = 0; netId < nets.size(); netId++) {
+      Set<Cell> cells = new LinkedHashSet<Cell>();
+      for (Node node : nets.get(netId).getSortedNodes()) {
+        cells.add(GridModel.snap(node.getPoint2D()));
+      }
+      List<Cell> kept = new ArrayList<Cell>();
+      for (Cell cell : cells) {
+        Integer owner = cellOwner.putIfAbsent(cell, netId);
+        if (owner == null || owner == netId) {
+          kept.add(cell);
+        } else {
+          skippedRoutingPins++;
+        }
+      }
+      netCells.add(kept);
+    }
+
+    Rectangle bounds = grid.occupiedBounds();
+    if (bounds == null || netCells.isEmpty()) {
+      return;
+    }
+    bounds.grow(DRY_RUN_MARGIN, DRY_RUN_MARGIN);
+    routing = new Router(grid, bounds).routeAll(netCells);
   }
 
   public ComponentClassifier.Classification getClassification() {
@@ -122,5 +181,15 @@ public class CompressionSurvey {
 
   public long getStretchableCount() {
     return footprints.stream().filter(Footprint::isStretchable).count();
+  }
+
+  /** Routing estimate at the current placement, or null when there was nothing to route. */
+  public RoutingResult getRouting() {
+    return routing;
+  }
+
+  /** Pins dropped from the dry run because grid snapping collapsed them onto a foreign net. */
+  public int getSkippedRoutingPins() {
+    return skippedRoutingPins;
   }
 }
