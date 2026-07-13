@@ -79,6 +79,7 @@ import org.diylc.swing.gui.editor.PropertyEditorDialog;
 import org.diylc.swing.plugins.autosave.AutoSavePlugin;
 import org.diylc.swing.plugins.canvas.CanvasPlugin;
 import org.diylc.swing.plugins.cloud.CloudPlugIn;
+import org.diylc.swing.plugins.compressor.CompressorPlugin;
 import org.diylc.swing.plugins.config.ConfigPlugin;
 import org.diylc.swing.plugins.edit.EditMenuPlugin;
 import org.diylc.swing.plugins.explorer.ExplorerPlugin;
@@ -130,6 +131,7 @@ public class MainFrame extends JFrame implements ISwingUI {
     presenter.installPlugin(() -> new FileMenuPlugin(this));
     presenter.installPlugin(() -> new AnalyzeMenuPlugin(this));
     presenter.installPlugin(() -> new EditMenuPlugin(this));
+    presenter.installPlugin(() -> new CompressorPlugin(this));
     presenter.installPlugin(() -> new ConfigPlugin(this));
     presenter.installPlugin(() -> new LayersMenuPlugin(this));
     presenter.installPlugin(() -> new ChatbotPlugin(this));

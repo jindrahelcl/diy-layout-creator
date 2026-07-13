@@ -387,6 +387,18 @@ public class NetlistBuilder {
     }
   }
 
+  /**
+   * Builds the list of direct connections without engaging switches, the same way
+   * {@link #extractNetlists(boolean, Project, List)} does in exclude-switches mode. Allows
+   * callers to assemble netlists from a custom set of nodes via
+   * {@link #buildNetlist(List, Collection, Collection, Collection)}.
+   */
+  public static List<Connection> getDirectConnections(Project project) {
+    Map<ISwitch, Integer> switchPositions = new HashMap<ISwitch, Integer>();
+    switchPositions.put(new TrivialSwitch(), 0);
+    return getConnections(project, switchPositions);
+  }
+
   @SuppressWarnings({"unchecked", "unlikely-arg-type"})
   private static List<Connection> getConnections(Project project,
       Map<ISwitch, Integer> switchPositions) {
