@@ -156,6 +156,32 @@ public class GridModel {
     wireHoles.values().removeIf((v) -> v == netId);
   }
 
+  /** Net owning a run through this hole, or null. */
+  public Integer wireHoleNetAt(Cell cell) {
+    return wireHoles.get(cell);
+  }
+
+  /** Net owning a run over this edge, or null. */
+  public Integer wireEdgeNetAt(Cell from, Cell to) {
+    return wireEdges.get(Edge.between(from, to));
+  }
+
+  public record WireSnapshot(Map<Edge, Integer> edges, Map<Cell, Integer> holes) {
+  }
+
+  /** Copy of the current wire state; restore with {@link #restoreWires} to undo a rip-up. */
+  public WireSnapshot snapshotWires() {
+    return new WireSnapshot(new HashMap<Edge, Integer>(wireEdges),
+        new HashMap<Cell, Integer>(wireHoles));
+  }
+
+  public void restoreWires(WireSnapshot snapshot) {
+    wireEdges.clear();
+    wireEdges.putAll(snapshot.edges());
+    wireHoles.clear();
+    wireHoles.putAll(snapshot.holes());
+  }
+
   /** Bounding box of all occupied cells in cell coordinates, or null if nothing is occupied. */
   public Rectangle occupiedBounds() {
     Rectangle bounds = null;

@@ -66,10 +66,19 @@ public class Router {
    * unreachable. The path includes both endpoints; it is not claimed in the grid.
    */
   public List<Cell> findPath(int netId, Cell source, Set<Cell> targets) {
+    return findPath(netId, source, targets, false);
+  }
+
+  /**
+   * @param throughForeignWires probe mode for rip-up: foreign runs don't block (pins still
+   *        do), so the result shows which nets stand in the way
+   */
+  private List<Cell> findPath(int netId, Cell source, Set<Cell> targets,
+      boolean throughForeignWires) {
     if (targets.contains(source)) {
       return List.of(source);
     }
-    if (!inBounds(source) || !grid.canPassHole(netId, source)) {
+    if (!inBounds(source) || !holeOpen(netId, source, throughForeignWires)) {
       return null;
     }
 
@@ -93,8 +102,9 @@ public class Router {
       }
       for (int dir = 0; dir < DIRECTIONS.length; dir++) {
         Cell next = new Cell(cell.col() + DIRECTIONS[dir][0], cell.row() + DIRECTIONS[dir][1]);
-        if (!inBounds(next) || !grid.canUseEdge(netId, cell, next)
-            || !grid.canPassHole(netId, next)) {
+        if (!inBounds(next)
+            || (!throughForeignWires && !grid.canUseEdge(netId, cell, next))
+            || !holeOpen(netId, next, throughForeignWires)) {
           continue;
         }
         int cost = current.cost + STEP_COST;
@@ -135,13 +145,103 @@ public class Router {
     RoutedNet[] routed = new RoutedNet[netPins.size()];
     for (int netId : order) {
       RoutedNet net = routeNet(netId, netPins.get(netId));
-      resolveFailedPins(net, netPins.get(netId));
       routed[netId] = net;
+      for (Cell pin : new ArrayList<Cell>(net.getFailedPins())) {
+        if (tryRipUpAndReroute(netId, pin, net, netPins, routed)) {
+          net.getFailedPins().remove(pin);
+        }
+      }
+      resolveFailedPins(net, netPins.get(netId));
     }
 
     RoutingResult result = new RoutingResult();
     Collections.addAll(result.getNets(), routed);
     return result;
+  }
+
+  public static final int MAX_RIP_UP = 3;
+
+  /**
+   * Tries to connect a failed pin by ripping up the nets blocking its way and re-routing them.
+   * Kept only when it doesn't create more jumpers among the ripped nets than it saves here;
+   * otherwise all wire state is restored.
+   */
+  private boolean tryRipUpAndReroute(int netId, Cell pin, RoutedNet net,
+      List<List<Cell>> netPins, RoutedNet[] routed) {
+    Set<Cell> tree = connectedCells(net, netPins.get(netId));
+    if (tree.isEmpty()) {
+      return false;
+    }
+    List<Cell> probe = findPath(netId, pin, tree, true);
+    if (probe == null) {
+      return false;
+    }
+    Set<Integer> blockers = blockersAlong(netId, probe);
+    if (blockers.isEmpty() || blockers.size() > MAX_RIP_UP) {
+      return false;
+    }
+
+    GridModel.WireSnapshot snapshot = grid.snapshotWires();
+    Map<Integer, RoutedNet> oldNets = new HashMap<Integer, RoutedNet>();
+    int oldJumpers = 0;
+    for (int blocker : blockers) {
+      oldNets.put(blocker, routed[blocker]);
+      oldJumpers += routed[blocker].getJumpers().size();
+      grid.releaseNet(blocker);
+    }
+
+    List<Cell> path = findPath(netId, pin, tree, false);
+    if (path == null) {
+      grid.restoreWires(snapshot);
+      return false;
+    }
+    net.getRuns().add(path);
+    grid.claimRun(netId, path);
+
+    int newJumpers = 0;
+    for (int blocker : blockers) {
+      RoutedNet rerouted = routeNet(blocker, netPins.get(blocker));
+      resolveFailedPins(rerouted, netPins.get(blocker));
+      newJumpers += rerouted.getJumpers().size();
+      routed[blocker] = rerouted;
+    }
+
+    if (newJumpers > oldJumpers) {
+      grid.restoreWires(snapshot);
+      net.getRuns().remove(net.getRuns().size() - 1);
+      for (Map.Entry<Integer, RoutedNet> entry : oldNets.entrySet()) {
+        routed[entry.getKey()] = entry.getValue();
+      }
+      return false;
+    }
+    return true;
+  }
+
+  /** Cells the net's connected part occupies: its tree, or its non-failed pins if unrouted. */
+  private static Set<Cell> connectedCells(RoutedNet net, List<Cell> pins) {
+    Set<Cell> cells = net.getTreeCells();
+    if (cells.isEmpty()) {
+      cells = new HashSet<Cell>(pins);
+      cells.removeAll(net.getFailedPins());
+    }
+    return cells;
+  }
+
+  private Set<Integer> blockersAlong(int netId, List<Cell> path) {
+    Set<Integer> blockers = new HashSet<Integer>();
+    for (int i = 0; i < path.size(); i++) {
+      Integer holeNet = grid.wireHoleNetAt(path.get(i));
+      if (holeNet != null && holeNet != netId) {
+        blockers.add(holeNet);
+      }
+      if (i > 0) {
+        Integer edgeNet = grid.wireEdgeNetAt(path.get(i - 1), path.get(i));
+        if (edgeNet != null && edgeNet != netId) {
+          blockers.add(edgeNet);
+        }
+      }
+    }
+    return blockers;
   }
 
   /** Connects each failed pin with a top-side jumper to the nearest connected cell. */
@@ -260,6 +360,17 @@ public class Router {
 
   private static int manhattan(Cell a, Cell b) {
     return Math.abs(a.col() - b.col()) + Math.abs(a.row() - b.row());
+  }
+
+  private boolean holeOpen(int netId, Cell cell, boolean throughForeignWires) {
+    if (!throughForeignWires) {
+      return grid.canPassHole(netId, cell);
+    }
+    Integer pinNet = grid.pinNetAt(cell);
+    if (pinNet != null) {
+      return pinNet == netId;
+    }
+    return grid.pinsAt(cell).isEmpty();
   }
 
   private boolean inBounds(Cell cell) {

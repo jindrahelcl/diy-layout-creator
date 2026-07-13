@@ -214,6 +214,22 @@ public class RouterTests {
   }
 
   @Test
+  public void ripsUpBlockingNetInsteadOfJumping() {
+    // same crossing topology as the jumper fixture, but one extra row: after ripping up the
+    // horizontal net, it can detour under the vertical one — no jumper needed at all
+    Router router = new Router(new GridModel(), new Rectangle(0, 0, 4, 5));
+    List<List<Cell>> nets = List.of(
+        List.of(new Cell(0, 2), new Cell(4, 2)),
+        List.of(new Cell(2, 0), new Cell(2, 4)));
+
+    RoutingResult result = router.routeAll(nets);
+
+    assertEquals(0, result.getJumperCount());
+    // vertical net straight (4) + horizontal net detouring around it (10)
+    assertEquals(14, result.getTotalWireLength());
+  }
+
+  @Test
   public void netsMayEndOnAdjacentPinsOfOtherNets() {
     GridModel grid = new GridModel();
     Router router = new Router(grid, new Rectangle(0, 0, 9, 9));
