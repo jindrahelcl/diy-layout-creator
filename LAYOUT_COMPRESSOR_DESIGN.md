@@ -228,10 +228,20 @@ Each milestone builds, passes existing tests, and is demoable. Sizes are rough.
 
   *Accept:* fixture suite passes; two nets forced to cross on a bounded board yield exactly
   one jumper; parallel nets yield zero.
-- **M3 — Normalization end-to-end (large).** Seeder + legalizer + route-all + `LayoutEmitter` +
-  verification + `applyEditor` wiring. First real "Compress Layout (rough)" button.
-  *(M3.0, done early: the preview dialog runs a routing dry-run at the current placement —
-  wire length + jumper estimate on real projects, existing wiring ignored.)*
+- **M3 — Normalization end-to-end (large).** First real "Compress Layout" button. Steps:
+  - **M3.0 (done early):** routing dry-run in the preview dialog — wire length + jumper
+    estimate at the current placement, existing wiring ignored.
+  - **M3.1 — Placement seeder + legalizer:** scale original geometry onto the grid (preserves
+    the author's grouping), then legalize largest-first: spiral search around each part's
+    desired spot, trying rotations and stretchable spans; grows the canvas rather than fail.
+  - **M3.2 — `LayoutEmitter`:** apply placement to components, emit underside runs as dashed
+    dark `Jumper`s and top jumpers as solid red ones, add shrink-wrapped `PerfBoard`,
+    board-first z-order.
+  - **M3.3 — `LayoutCompressor` editor + verification:** full pipeline as `IProjectEditor`
+    (strip old wiring/boards → seed → legalize → route → emit); netlist-equality gate using
+    the compressor's own node rule (terminal blocks!); abort untouched on mismatch.
+  - **M3.4 — UI wiring + smoke:** "Compress Layout" action via `applyEditor`, result summary
+    dialog, manual smoke on the test project, regression sweep.
   *Accept:* ≥ 5 perfboard-suitable regression projects compress with netlist equality; undo
   restores the original exactly.
 - **M4 — Compression loop (large).** Move catalogue + incremental reroute + annealer + time
