@@ -113,6 +113,84 @@ public class Router {
   }
 
   /**
+   * Routes all nets: pins get net-tagged in the grid, then nets route smallest-extent first
+   * (short nets have the least freedom to detour). Pins that can't reach their net on the
+   * underside get a top-side jumper to the nearest connected cell, so every net always ends up
+   * fully connected.
+   */
+  public RoutingResult routeAll(List<List<Cell>> netPins) {
+    for (int netId = 0; netId < netPins.size(); netId++) {
+      for (Cell pin : netPins.get(netId)) {
+        grid.setPinNet(pin, netId);
+      }
+    }
+
+    List<Integer> order = new ArrayList<Integer>();
+    for (int netId = 0; netId < netPins.size(); netId++) {
+      order.add(netId);
+    }
+    order.sort(Comparator.comparingInt((netId) -> halfPerimeter(netPins.get((int) netId)))
+        .thenComparingInt((netId) -> (int) netId));
+
+    RoutedNet[] routed = new RoutedNet[netPins.size()];
+    for (int netId : order) {
+      RoutedNet net = routeNet(netId, netPins.get(netId));
+      resolveFailedPins(net, netPins.get(netId));
+      routed[netId] = net;
+    }
+
+    RoutingResult result = new RoutingResult();
+    Collections.addAll(result.getNets(), routed);
+    return result;
+  }
+
+  /** Connects each failed pin with a top-side jumper to the nearest connected cell. */
+  private void resolveFailedPins(RoutedNet net, List<Cell> pins) {
+    if (net.getFailedPins().isEmpty()) {
+      return;
+    }
+    Set<Cell> connected = net.getTreeCells();
+    if (connected.isEmpty()) {
+      connected = new HashSet<Cell>(pins);
+      connected.removeAll(net.getFailedPins());
+    }
+    for (Cell pin : new ArrayList<Cell>(net.getFailedPins())) {
+      Cell target = nearestCell(pin, connected);
+      net.getJumpers().add(new RoutedNet.Jumper(pin, target));
+      connected.add(pin);
+    }
+    net.getFailedPins().clear();
+  }
+
+  private static Cell nearestCell(Cell from, Set<Cell> candidates) {
+    Cell best = null;
+    int bestDistance = Integer.MAX_VALUE;
+    for (Cell c : candidates) {
+      int d = manhattan(from, c);
+      if (d < bestDistance || (d == bestDistance && OPEN_CELL_ORDER.compare(c, best) < 0)) {
+        bestDistance = d;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  private static int halfPerimeter(List<Cell> pins) {
+    int minCol = Integer.MAX_VALUE, maxCol = Integer.MIN_VALUE;
+    int minRow = Integer.MAX_VALUE, maxRow = Integer.MIN_VALUE;
+    for (Cell pin : pins) {
+      minCol = Math.min(minCol, pin.col());
+      maxCol = Math.max(maxCol, pin.col());
+      minRow = Math.min(minRow, pin.row());
+      maxRow = Math.max(maxRow, pin.row());
+    }
+    return (maxCol - minCol) + (maxRow - minRow);
+  }
+
+  private static final Comparator<Cell> OPEN_CELL_ORDER =
+      Comparator.comparingInt(Cell::col).thenComparingInt(Cell::row);
+
+  /**
    * Routes one multi-terminal net: seeds the tree with the closest pin pair, then extends it
    * Prim-style, connecting each remaining pin to the nearest tree cell. Successful runs are
    * claimed in the grid; pins that can't reach the tree end up in

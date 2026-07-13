@@ -180,4 +180,53 @@ public class RouterTests {
   private static RoutedNet routePins(Router router, int netId, Cell... pins) {
     return router.routeNet(netId, List.of(pins));
   }
+
+  @Test
+  public void crossingNetsOnBoundedBoardNeedExactlyOneJumper() {
+    GridModel grid = new GridModel();
+    Router router = new Router(grid, new Rectangle(0, 0, 4, 4));
+    // net 0 spans the full width, net 1 the full height: they must cross somewhere
+    List<List<Cell>> nets = List.of(
+        List.of(new Cell(0, 2), new Cell(4, 2)),
+        List.of(new Cell(2, 0), new Cell(2, 4)));
+
+    RoutingResult result = router.routeAll(nets);
+
+    assertEquals(1, result.getJumperCount());
+    for (RoutedNet net : result.getNets()) {
+      assertTrue(net.getFailedPins().isEmpty());
+    }
+    // one net routed on the underside with minimal length, the other jumped
+    assertEquals(4, result.getTotalWireLength());
+  }
+
+  @Test
+  public void parallelNetsNeedNoJumpers() {
+    Router router = new Router(new GridModel(), new Rectangle(0, 0, 4, 4));
+    List<List<Cell>> nets = List.of(
+        List.of(new Cell(0, 1), new Cell(4, 1)),
+        List.of(new Cell(0, 3), new Cell(4, 3)));
+
+    RoutingResult result = router.routeAll(nets);
+
+    assertEquals(0, result.getJumperCount());
+    assertEquals(8, result.getTotalWireLength());
+  }
+
+  @Test
+  public void netsMayEndOnAdjacentPinsOfOtherNets() {
+    GridModel grid = new GridModel();
+    Router router = new Router(grid, new Rectangle(0, 0, 9, 9));
+    // an IC-like pin row: adjacent pins belong to different nets
+    List<List<Cell>> nets = List.of(
+        List.of(new Cell(2, 2), new Cell(7, 5)),
+        List.of(new Cell(2, 3), new Cell(7, 6)));
+
+    RoutingResult result = router.routeAll(nets);
+
+    assertEquals(0, result.getJumperCount());
+    for (RoutedNet net : result.getNets()) {
+      assertTrue(net.getFailedPins().isEmpty());
+    }
+  }
 }
