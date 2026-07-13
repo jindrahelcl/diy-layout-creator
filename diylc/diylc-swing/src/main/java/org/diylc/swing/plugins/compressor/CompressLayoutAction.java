@@ -1,7 +1,7 @@
 /*
 
     DIY Layout Creator (DIYLC).
-    Copyright (c) 2009-2025 held jointly by the individual authors.
+    Copyright (c) 2009-2026 held jointly by the individual authors.
 
     This file is part of DIYLC.
 
@@ -33,7 +33,9 @@ import org.diylc.common.IPlugInPort;
 import org.diylc.common.ITask;
 import org.diylc.core.IDIYComponent;
 import org.diylc.editor.compressor.CompressionSurvey;
+import org.diylc.presenter.ComponentArea;
 import org.diylc.presenter.ContinuityArea;
+import org.diylc.presenter.DrawingManager;
 import org.diylc.swing.ISwingUI;
 import org.diylc.utils.IconLoader;
 
@@ -66,9 +68,13 @@ public class CompressLayoutAction extends AbstractAction {
 
       @Override
       public CompressionSurvey doInBackground() throws Exception {
-        List<ContinuityArea> continuityAreas =
-            plugInPort.getDrawingManager().getContinuityAreas();
-        return CompressionSurvey.of(plugInPort.getCurrentProject(), continuityAreas);
+        DrawingManager drawingManager = plugInPort.getDrawingManager();
+        List<ContinuityArea> continuityAreas = drawingManager.getContinuityAreas();
+        return CompressionSurvey.of(plugInPort.getCurrentProject(), continuityAreas, (c) -> {
+          ComponentArea area = drawingManager.getComponentArea(c);
+          return area == null || area.getOutlineArea() == null ? null
+              : area.getOutlineArea().getBounds2D();
+        });
       }
 
       @Override
@@ -102,6 +108,17 @@ public class CompressLayoutAction extends AbstractAction {
         .append(" of the ").append(survey.getStickyPinCount())
         .append(" pins on real parts; ").append(survey.getOpenPinCount())
         .append(" pins unconnected.</p>");
+    sb.append("<h3>Footprints</h3>");
+    sb.append("<p>").append(survey.getOnGridCount()).append(" parts fit the 0.1&quot; grid (")
+        .append(survey.getStretchableCount()).append(" with stretchable leads); ")
+        .append(survey.getOffGridParts().size()).append(" off-grid");
+    if (!survey.getOffGridParts().isEmpty()) {
+      sb.append(": ")
+          .append(survey.getOffGridParts().stream().map(IDIYComponent::getName).sorted()
+              .collect(Collectors.joining(", ")))
+          .append(" &mdash; these stay in place and get connected by wires");
+    }
+    sb.append(".</p>");
     sb.append("</body></html>");
     return sb.toString();
   }

@@ -1,7 +1,7 @@
 /*
 
     DIY Layout Creator (DIYLC).
-    Copyright (c) 2009-2025 held jointly by the individual authors.
+    Copyright (c) 2009-2026 held jointly by the individual authors.
 
     This file is part of DIYLC.
 
@@ -51,14 +51,15 @@ public class FootprintTests {
   }
 
   @Test
-  public void skewedLeadedPassiveIsOffGrid() {
+  public void skewedLeadedPassiveStillFitsGridBecauseSpanIsFlexible() {
     Resistor resistor = new Resistor();
     resistor.setControlPoint(new Point2D.Double(100, 100), 0);
     resistor.setControlPoint(new Point2D.Double(150, 110), 1);
 
     Footprint footprint = Footprint.of(resistor);
 
-    assertFalse(footprint.isOnGrid());
+    assertTrue(footprint.isOnGrid());
+    assertTrue(footprint.isStretchable());
   }
 
   @Test
@@ -97,6 +98,20 @@ public class FootprintTests {
     // 0.2" pitch = 2 cells
     assertEquals(Arrays.asList(new Cell(0, 0), new Cell(0, 2), new Cell(0, 4)),
         footprint.getPinOffsets());
+  }
+
+  @Test
+  public void bodyCellsCoverBlockedHoles() {
+    Resistor resistor = new Resistor();
+    resistor.setControlPoint(new Point2D.Double(100, 100), 0);
+    resistor.setControlPoint(new Point2D.Double(200, 100), 1);
+
+    // body from x=110..190, y=90..110 relative to the layout: covers holes 1..4 in row 0
+    Footprint footprint =
+        Footprint.of(resistor, new java.awt.geom.Rectangle2D.Double(110, 90, 80, 20));
+
+    assertEquals(new java.awt.Rectangle(1, 0, 3, 0), footprint.getBodyCells());
+    assertEquals(null, Footprint.of(resistor).getBodyCells());
   }
 
   @Test

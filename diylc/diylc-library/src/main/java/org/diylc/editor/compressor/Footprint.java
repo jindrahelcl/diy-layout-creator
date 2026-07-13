@@ -1,7 +1,7 @@
 /*
 
     DIY Layout Creator (DIYLC).
-    Copyright (c) 2009-2025 held jointly by the individual authors.
+    Copyright (c) 2009-2026 held jointly by the individual authors.
 
     This file is part of DIYLC.
 
@@ -21,7 +21,9 @@
 */
 package org.diylc.editor.compressor;
 
+import java.awt.Rectangle;
 import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -46,17 +48,23 @@ public class Footprint {
   private final List<Cell> pinOffsets;
   private final boolean onGrid;
   private final boolean stretchable;
+  private final Rectangle bodyCells;
 
   private Footprint(IDIYComponent<?> component, List<Integer> pinIndices, List<Cell> pinOffsets,
-      boolean onGrid, boolean stretchable) {
+      boolean onGrid, boolean stretchable, Rectangle bodyCells) {
     this.component = component;
     this.pinIndices = pinIndices;
     this.pinOffsets = pinOffsets;
     this.onGrid = onGrid;
     this.stretchable = stretchable;
+    this.bodyCells = bodyCells;
   }
 
   public static Footprint of(IDIYComponent<?> component) {
+    return of(component, null);
+  }
+
+  public static Footprint of(IDIYComponent<?> component, Rectangle2D bodyBoundsPx) {
     List<Integer> pinIndices = new ArrayList<Integer>();
     List<Point2D> pinPoints = new ArrayList<Point2D>();
     for (int i = 0; i < component.getControlPointCount(); i++) {
@@ -86,8 +94,31 @@ public class Footprint {
     boolean stretchable =
         component instanceof AbstractLeadedComponent && pinIndices.size() == 2;
 
+    // a stretchable part always fits the lattice: the placer picks a new span anyway,
+    // so only fixed-shape pin geometry can be genuinely off-grid
+    if (stretchable) {
+      onGrid = true;
+    }
+
+    Rectangle bodyCells = null;
+    if (bodyBoundsPx != null && !pinPoints.isEmpty()) {
+      bodyCells = coveredCells(bodyBoundsPx, pinPoints.get(0));
+    }
+
     return new Footprint(component, Collections.unmodifiableList(pinIndices),
-        Collections.unmodifiableList(pinOffsets), onGrid, stretchable);
+        Collections.unmodifiableList(pinOffsets), onGrid, stretchable, bodyCells);
+  }
+
+  /** Lattice holes the body rectangle covers, in cells relative to the reference pin. */
+  private static Rectangle coveredCells(Rectangle2D boundsPx, Point2D referencePin) {
+    int minCol = (int) Math.ceil((boundsPx.getMinX() - referencePin.getX()) / GridModel.CELL_SIZE_PX);
+    int maxCol = (int) Math.floor((boundsPx.getMaxX() - referencePin.getX()) / GridModel.CELL_SIZE_PX);
+    int minRow = (int) Math.ceil((boundsPx.getMinY() - referencePin.getY()) / GridModel.CELL_SIZE_PX);
+    int maxRow = (int) Math.floor((boundsPx.getMaxY() - referencePin.getY()) / GridModel.CELL_SIZE_PX);
+    if (minCol > maxCol || minRow > maxRow) {
+      return null;
+    }
+    return new Rectangle(minCol, minRow, maxCol - minCol, maxRow - minRow);
   }
 
   /** Pin offsets rotated by the given number of 90-degree clockwise turns. */
@@ -127,5 +158,13 @@ public class Footprint {
 
   public boolean isStretchable() {
     return stretchable;
+  }
+
+  /**
+   * Lattice holes blocked by the component body, in cells relative to the first pin, or null
+   * when unknown (no drawn area available) or when the body covers no holes.
+   */
+  public Rectangle getBodyCells() {
+    return bodyCells;
   }
 }

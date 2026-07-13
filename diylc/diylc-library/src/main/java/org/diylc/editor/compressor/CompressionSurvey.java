@@ -1,7 +1,7 @@
 /*
 
     DIY Layout Creator (DIYLC).
-    Copyright (c) 2009-2025 held jointly by the individual authors.
+    Copyright (c) 2009-2026 held jointly by the individual authors.
 
     This file is part of DIYLC.
 
@@ -21,7 +21,11 @@
 */
 package org.diylc.editor.compressor;
 
+import java.awt.geom.Rectangle2D;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.diylc.core.IDIYComponent;
 import org.diylc.core.Project;
@@ -38,32 +42,43 @@ public class CompressionSurvey {
 
   private final ComponentClassifier.Classification classification;
   private final List<Group> nets;
+  private final List<Footprint> footprints;
   private final int stickyPinCount;
 
   private CompressionSurvey(ComponentClassifier.Classification classification, List<Group> nets,
-      int stickyPinCount) {
+      List<Footprint> footprints, int stickyPinCount) {
     this.classification = classification;
     this.nets = nets;
+    this.footprints = footprints;
     this.stickyPinCount = stickyPinCount;
   }
 
   public static CompressionSurvey of(Project project, List<ContinuityArea> continuityAreas) {
+    return of(project, continuityAreas, null);
+  }
+
+  /**
+   * @param bodyBoundsProvider optional source of drawn body bounds per component (from
+   *        {@code DrawingManager.getComponentArea}); footprints get no body extents without it
+   */
+  public static CompressionSurvey of(Project project, List<ContinuityArea> continuityAreas,
+      Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider) {
     ComponentClassifier.Classification classification =
         new ComponentClassifier().classify(project);
 
     List<Group> nets =
         NetExtractor.extractNets(project, continuityAreas, classification.getRealParts());
 
+    List<Footprint> footprints = new ArrayList<Footprint>();
     int stickyPinCount = 0;
     for (IDIYComponent<?> c : classification.getRealParts()) {
-      for (int i = 0; i < c.getControlPointCount(); i++) {
-        if (c.isControlPointSticky(i)) {
-          stickyPinCount++;
-        }
-      }
+      Rectangle2D bodyBounds = bodyBoundsProvider == null ? null : bodyBoundsProvider.apply(c);
+      Footprint footprint = Footprint.of(c, bodyBounds);
+      footprints.add(footprint);
+      stickyPinCount += footprint.getPinCount();
     }
 
-    return new CompressionSurvey(classification, nets, stickyPinCount);
+    return new CompressionSurvey(classification, nets, footprints, stickyPinCount);
   }
 
   public ComponentClassifier.Classification getClassification() {
@@ -90,5 +105,22 @@ public class CompressionSurvey {
   /** Pins on real parts that belong to no net. */
   public int getOpenPinCount() {
     return stickyPinCount - getConnectedPinCount();
+  }
+
+  public List<Footprint> getFootprints() {
+    return footprints;
+  }
+
+  public List<IDIYComponent<?>> getOffGridParts() {
+    return footprints.stream().filter(f -> !f.isOnGrid()).map(Footprint::getComponent)
+        .collect(Collectors.toList());
+  }
+
+  public long getOnGridCount() {
+    return footprints.stream().filter(Footprint::isOnGrid).count();
+  }
+
+  public long getStretchableCount() {
+    return footprints.stream().filter(Footprint::isStretchable).count();
   }
 }
