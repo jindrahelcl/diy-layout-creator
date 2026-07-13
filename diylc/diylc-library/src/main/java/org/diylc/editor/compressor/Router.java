@@ -26,6 +26,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
@@ -108,6 +110,78 @@ public class Router {
       }
     }
     return null;
+  }
+
+  /**
+   * Routes one multi-terminal net: seeds the tree with the closest pin pair, then extends it
+   * Prim-style, connecting each remaining pin to the nearest tree cell. Successful runs are
+   * claimed in the grid; pins that can't reach the tree end up in
+   * {@link RoutedNet#getFailedPins()}.
+   */
+  public RoutedNet routeNet(int netId, List<Cell> pins) {
+    RoutedNet net = new RoutedNet(netId);
+    Set<Cell> remaining = new LinkedHashSet<Cell>(pins);
+    if (remaining.size() < 2) {
+      return net;
+    }
+
+    List<Cell> pinList = new ArrayList<Cell>(remaining);
+    Cell[] seed = closestPair(pinList);
+    Set<Cell> tree = new HashSet<Cell>();
+    tree.add(seed[0]);
+    remaining.remove(seed[0]);
+
+    while (!remaining.isEmpty()) {
+      Cell pin = nearestToTree(remaining, tree);
+      remaining.remove(pin);
+      List<Cell> path = findPath(netId, pin, tree);
+      if (path == null) {
+        net.getFailedPins().add(pin);
+        continue;
+      }
+      if (path.size() > 1) {
+        net.getRuns().add(path);
+        grid.claimRun(netId, path);
+      }
+      tree.addAll(path);
+      tree.add(pin);
+    }
+    return net;
+  }
+
+  private static Cell[] closestPair(List<Cell> pins) {
+    Cell[] best = {pins.get(0), pins.get(1)};
+    int bestDistance = Integer.MAX_VALUE;
+    for (int i = 0; i < pins.size() - 1; i++) {
+      for (int j = i + 1; j < pins.size(); j++) {
+        int d = manhattan(pins.get(i), pins.get(j));
+        if (d < bestDistance) {
+          bestDistance = d;
+          best[0] = pins.get(i);
+          best[1] = pins.get(j);
+        }
+      }
+    }
+    return best;
+  }
+
+  private static Cell nearestToTree(Set<Cell> pins, Set<Cell> tree) {
+    Cell best = null;
+    int bestDistance = Integer.MAX_VALUE;
+    for (Cell pin : pins) {
+      for (Cell cell : tree) {
+        int d = manhattan(pin, cell);
+        if (d < bestDistance) {
+          bestDistance = d;
+          best = pin;
+        }
+      }
+    }
+    return best;
+  }
+
+  private static int manhattan(Cell a, Cell b) {
+    return Math.abs(a.col() - b.col()) + Math.abs(a.row() - b.row());
   }
 
   private boolean inBounds(Cell cell) {

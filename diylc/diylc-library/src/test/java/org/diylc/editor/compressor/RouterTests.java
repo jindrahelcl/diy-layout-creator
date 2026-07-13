@@ -22,6 +22,7 @@
 package org.diylc.editor.compressor;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -128,5 +129,55 @@ public class RouterTests {
         router.findPath(0, new Cell(0, 0), Set.of(new Cell(9, 9), new Cell(2, 0)));
 
     assertEquals(new Cell(2, 0), path.get(path.size() - 1));
+  }
+
+  @Test
+  public void routesThreePinNetAsConnectedTree() {
+    GridModel grid = new GridModel();
+    Router router = new Router(grid, BOUNDS);
+
+    RoutedNet net =
+        routePins(router, 0, new Cell(2, 2), new Cell(8, 2), new Cell(5, 6));
+
+    assertTrue(net.getFailedPins().isEmpty());
+    assertEquals(2, net.getRuns().size());
+    Set<Cell> tree = net.getTreeCells();
+    assertTrue(tree.contains(new Cell(2, 2)));
+    assertTrue(tree.contains(new Cell(8, 2)));
+    assertTrue(tree.contains(new Cell(5, 6)));
+    // minimal tree: 6 steps between the seed pair + 4 up to the third pin
+    assertEquals(10, net.getWireLength());
+    // the tree is claimed: a foreign run may not pass through it
+    assertFalse(grid.canPassHole(1, new Cell(5, 2)));
+  }
+
+  @Test
+  public void collectsUnreachablePinAsFailed() {
+    GridModel grid = new GridModel();
+    // wall net 1 across the full board height at col 6
+    for (int row = 0; row <= 9; row++) {
+      grid.claimRun(1, List.of(new Cell(6, row)));
+    }
+    Router router = new Router(grid, BOUNDS);
+
+    RoutedNet net =
+        routePins(router, 0, new Cell(1, 1), new Cell(4, 1), new Cell(9, 1));
+
+    assertEquals(List.of(new Cell(9, 1)), net.getFailedPins());
+    assertEquals(1, net.getRuns().size());
+  }
+
+  @Test
+  public void singlePinNetNeedsNoRouting() {
+    Router router = new Router(new GridModel(), BOUNDS);
+
+    RoutedNet net = routePins(router, 0, new Cell(4, 4));
+
+    assertTrue(net.getRuns().isEmpty());
+    assertTrue(net.getFailedPins().isEmpty());
+  }
+
+  private static RoutedNet routePins(Router router, int netId, Cell... pins) {
+    return router.routeNet(netId, List.of(pins));
   }
 }
