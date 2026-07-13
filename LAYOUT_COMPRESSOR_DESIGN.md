@@ -197,9 +197,21 @@ Each milestone builds, passes existing tests, and is demoable. Sizes are rough.
   Action extracts the netlist, classifies components, shows a summary dialog (N real parts,
   M connectivity components, K nets, P pins). *Accept:* correct numbers on 3 regression files;
   no behavior change elsewhere.
-- **M1 — World model (medium).** `GridModel`, `Footprint` extraction, `ComponentClassifier`;
-  headless load of `.diy` → model dump. Unit tests. *Accept:* footprints correct for the common
-  component families (leaded passives, DIL, TO-92, board-mounted); off-grid parts detected.
+- **M1 — World model (medium).** Three committable steps:
+  - **M1.1 — `GridModel`:** the 0.1″ lattice (1 cell = 20 px at DIYLC's 200 px/inch);
+    pixel ↔ cell conversion, snapping with tolerance, cell occupancy (pin owner / body owners),
+    occupied bounds. Unit tests.
+  - **M1.2 — `Footprint`:** per-component grid shape extracted from sticky control points:
+    pin offsets in cells relative to pin 0, on-grid check (all offsets within tolerance of the
+    lattice), 90° rotation variants, stretchable-lead detection for 2-pin
+    `AbstractLeadedComponent`s, off-grid flagging. Unit tests on representative families
+    (leaded passive, DIL, TO-92, terminal block, pot).
+  - **M1.3 — Project assembly + survey integration:** body extents from drawn component areas
+    (`DrawingManager.getComponentArea`), full project → model build, and footprint/off-grid
+    stats in the preview dialog. Verified against regression files and the manual test project.
+
+  *Accept:* footprints correct for the common component families (leaded passives, DIL, TO-92,
+  board-mounted); off-grid parts detected.
 - **M2 — Router (large).** A* + multi-terminal + rip-up/reroute + jumper fallback on
   `GridModel`, with synthetic-fixture tests. *Accept:* fixture suite passes; crossing-pair
   fixture yields exactly one jumper.
