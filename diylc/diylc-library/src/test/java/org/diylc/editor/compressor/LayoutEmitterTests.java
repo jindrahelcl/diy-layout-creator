@@ -28,6 +28,7 @@ import java.awt.Rectangle;
 import java.awt.geom.Point2D;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import org.diylc.common.LineStyle;
 import org.diylc.components.boards.PerfBoard;
@@ -56,7 +57,7 @@ public class LayoutEmitterTests {
     Project project = new Project();
     project.getComponents().add(resistor);
 
-    new LayoutEmitter().emit(project, List.of(placement), null, null);
+    new LayoutEmitter().emit(project, List.of(placement), null, null, Set.of());
 
     assertEquals(new Point2D.Double(100, 100), resistor.getControlPoint(0));
     assertEquals(new Point2D.Double(180, 100), resistor.getControlPoint(1));
@@ -70,7 +71,7 @@ public class LayoutEmitterTests {
     Project project = new Project();
     project.getComponents().add(block);
 
-    new LayoutEmitter().emit(project, List.of(placement), null, null);
+    new LayoutEmitter().emit(project, List.of(placement), null, null, Set.of());
 
     assertEquals(new Point2D.Double(100, 100), block.getControlPoint(0));
     assertEquals(new Point2D.Double(60, 100), block.getControlPoint(1));
@@ -86,7 +87,7 @@ public class LayoutEmitterTests {
     routing.getNets().add(net);
     Project project = new Project();
 
-    Emission emission = new LayoutEmitter().emit(project, List.of(), routing, null);
+    Emission emission = new LayoutEmitter().emit(project, List.of(), routing, null, Set.of());
 
     assertEquals(2, emission.wires().size());
     Jumper first = (Jumper) emission.wires().get(0);
@@ -100,6 +101,45 @@ public class LayoutEmitterTests {
   }
 
   @Test
+  public void runsBreakAtMidSegmentPins() {
+    // a straight run passes through a same-net pin at (2,0); wires only connect at their
+    // endpoints, so the run must be emitted as two jumpers meeting on that pin
+    RoutedNet net = new RoutedNet(0);
+    net.getRuns().add(Arrays.asList(new Cell(0, 0), new Cell(1, 0), new Cell(2, 0),
+        new Cell(3, 0), new Cell(4, 0)));
+    RoutingResult routing = new RoutingResult();
+    routing.getNets().add(net);
+    Project project = new Project();
+
+    Emission emission =
+        new LayoutEmitter().emit(project, List.of(), routing, null, Set.of(new Cell(2, 0)));
+
+    assertEquals(2, emission.wires().size());
+    assertEquals(new Point2D.Double(40, 0), emission.wires().get(0).getControlPoint(1));
+    assertEquals(new Point2D.Double(40, 0), emission.wires().get(1).getControlPoint(0));
+    assertEquals(new Point2D.Double(80, 0), emission.wires().get(1).getControlPoint(1));
+  }
+
+  @Test
+  public void runsBreakWhereBranchesAttach() {
+    // the second run tees into the middle of the first at (2,0), so the first run must break
+    // there to give the branch a shared endpoint
+    RoutedNet net = new RoutedNet(0);
+    net.getRuns().add(Arrays.asList(new Cell(0, 0), new Cell(1, 0), new Cell(2, 0),
+        new Cell(3, 0), new Cell(4, 0)));
+    net.getRuns().add(Arrays.asList(new Cell(2, 2), new Cell(2, 1), new Cell(2, 0)));
+    RoutingResult routing = new RoutingResult();
+    routing.getNets().add(net);
+    Project project = new Project();
+
+    Emission emission = new LayoutEmitter().emit(project, List.of(), routing, null, Set.of());
+
+    assertEquals(3, emission.wires().size());
+    assertEquals(new Point2D.Double(40, 0), emission.wires().get(0).getControlPoint(1));
+    assertEquals(new Point2D.Double(40, 0), emission.wires().get(1).getControlPoint(0));
+  }
+
+  @Test
   public void topJumpersAreSolidRed() {
     RoutedNet net = new RoutedNet(0);
     net.getJumpers().add(new RoutedNet.Jumper(new Cell(0, 0), new Cell(3, 4)));
@@ -107,7 +147,7 @@ public class LayoutEmitterTests {
     routing.getNets().add(net);
     Project project = new Project();
 
-    Emission emission = new LayoutEmitter().emit(project, List.of(), routing, null);
+    Emission emission = new LayoutEmitter().emit(project, List.of(), routing, null, Set.of());
 
     assertEquals(1, emission.wires().size());
     Jumper jumper = (Jumper) emission.wires().get(0);
@@ -123,8 +163,8 @@ public class LayoutEmitterTests {
     Project project = new Project();
     project.getComponents().add(resistor);
 
-    Emission emission =
-        new LayoutEmitter().emit(project, List.of(placement), null, new Rectangle(5, 5, 5, 0));
+    Emission emission = new LayoutEmitter().emit(project, List.of(placement), null,
+        new Rectangle(5, 5, 5, 0), Set.of());
 
     assertTrue(project.getComponents().get(0) instanceof PerfBoard);
     PerfBoard board = emission.board();

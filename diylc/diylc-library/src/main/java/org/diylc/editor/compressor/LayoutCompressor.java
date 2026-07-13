@@ -186,12 +186,17 @@ public class LayoutCompressor implements IProjectEditor {
     bounds.grow(ROUTING_MARGIN_CELLS, ROUTING_MARGIN_CELLS);
     RoutingResult routing = new Router(grid, bounds).routeAll(netCells);
 
+    Set<Cell> allPinCells = new HashSet<Cell>();
+    for (Map<Integer, Cell> pinMap : cellOf.values()) {
+      allPinCells.addAll(pinMap.values());
+    }
     LayoutEmitter emitter = new LayoutEmitter();
-    LayoutEmitter.Emission emission =
-        emitter.emit(scratch, legalized.placements(), routing, grid.occupiedBounds());
+    LayoutEmitter.Emission emission = emitter.emit(scratch, legalized.placements(), routing,
+        grid.occupiedBounds(), allPinCells);
 
     // hook up remote (off-grid / locked off-grid) pins with flying wires: each pin to the
-    // nearest cell of its net's routed tree, or pin to pin when the whole net is remote
+    // nearest board pin of its net (pins always carry wire endpoints, mid-run cells may not),
+    // or pin to pin when the whole net is remote
     int flyingWires = 0;
     Set<IDIYComponent<?>> emitted = new HashSet<IDIYComponent<?>>(emission.wires());
     if (emission.board() != null) {
@@ -205,10 +210,7 @@ public class LayoutCompressor implements IProjectEditor {
           continue;
         }
         Point2D pin = clone.getControlPoint(node.getPointIndex());
-        Cell target = nearestCell(pin, routing.getNets().get(netId).getTreeCells());
-        if (target == null) {
-          target = nearestCell(pin, netCells.get(netId));
-        }
+        Cell target = nearestCell(pin, netCells.get(netId));
         if (target != null) {
           emitted.add(emitter.emitFlyingWire(scratch, pin, GridModel.toPixels(target)));
           flyingWires++;

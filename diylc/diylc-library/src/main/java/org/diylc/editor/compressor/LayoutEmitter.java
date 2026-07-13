@@ -60,10 +60,12 @@ public class LayoutEmitter {
   /**
    * Applies placements and adds wires and the board to the project. {@code boardCells} is the
    * cell-space bounding box to wrap (typically the grid's occupied bounds); the board gets a
-   * one-cell margin beyond it.
+   * one-cell margin beyond it. {@code pinCells} holds every cell occupied by a pin: DIYLC only
+   * connects wires at their endpoints, so emitted segments must break wherever a run touches a
+   * pin or another wire of the net, even mid-straight.
    */
   public Emission emit(Project project, List<Placement> placements, RoutingResult routing,
-      Rectangle boardCells) {
+      Rectangle boardCells, Set<Cell> pinCells) {
     for (Placement placement : placements) {
       move(placement);
     }
@@ -76,8 +78,17 @@ public class LayoutEmitter {
     List<IDIYComponent<?>> wires = new ArrayList<IDIYComponent<?>>();
     if (routing != null) {
       for (RoutedNet net : routing.getNets()) {
+        Set<Cell> connectionCells = new HashSet<Cell>(pinCells);
         for (List<Cell> run : net.getRuns()) {
-          for (int[] segment : straightSegments(run)) {
+          connectionCells.add(run.get(0));
+          connectionCells.add(run.get(run.size() - 1));
+        }
+        for (RoutedNet.Jumper jumper : net.getJumpers()) {
+          connectionCells.add(jumper.from());
+          connectionCells.add(jumper.to());
+        }
+        for (List<Cell> run : net.getRuns()) {
+          for (int[] segment : segments(run, connectionCells)) {
             wires.add(wire(GridModel.toPixels(run.get(segment[0])),
                 GridModel.toPixels(run.get(segment[1])), UNDERSIDE_COLOR, LineStyle.DASHED,
                 nextName(names)));
@@ -184,10 +195,11 @@ public class LayoutEmitter {
   }
 
   /**
-   * Indices into the run marking maximal straight stretches: each pair is the segment's first
-   * and last cell index.
+   * Indices into the run marking emitted wire pieces: each pair is the piece's first and last
+   * cell index. A piece ends at a direction change and at every connection cell (pin or
+   * junction with another wire) — wires only connect at their endpoints.
    */
-  private static List<int[]> straightSegments(List<Cell> run) {
+  private static List<int[]> segments(List<Cell> run, Set<Cell> connectionCells) {
     List<int[]> segments = new ArrayList<int[]>();
     if (run.size() < 2) {
       return segments;
@@ -198,7 +210,7 @@ public class LayoutEmitter {
     for (int i = 2; i < run.size(); i++) {
       int dc = run.get(i).col() - run.get(i - 1).col();
       int dr = run.get(i).row() - run.get(i - 1).row();
-      if (dc != lastDc || dr != lastDr) {
+      if (dc != lastDc || dr != lastDr || connectionCells.contains(run.get(i - 1))) {
         segments.add(new int[] {start, i - 1});
         start = i - 1;
         lastDc = dc;
