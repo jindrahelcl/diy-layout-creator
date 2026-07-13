@@ -28,9 +28,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import org.diylc.common.ComponentType;
 import org.diylc.components.AbstractLeadedComponent;
 import org.diylc.core.IDIYComponent;
 import org.diylc.editor.compressor.GridModel.Cell;
+import org.diylc.presenter.ComponentProcessor;
 
 /**
  * A component's shape on the {@link GridModel} lattice: its sticky pins as cell offsets
@@ -48,15 +50,17 @@ public class Footprint {
   private final List<Cell> pinOffsets;
   private final boolean onGrid;
   private final boolean stretchable;
+  private final boolean rotatable;
   private final Rectangle bodyCells;
 
   private Footprint(IDIYComponent<?> component, List<Integer> pinIndices, List<Cell> pinOffsets,
-      boolean onGrid, boolean stretchable, Rectangle bodyCells) {
+      boolean onGrid, boolean stretchable, boolean rotatable, Rectangle bodyCells) {
     this.component = component;
     this.pinIndices = pinIndices;
     this.pinOffsets = pinOffsets;
     this.onGrid = onGrid;
     this.stretchable = stretchable;
+    this.rotatable = rotatable;
     this.bodyCells = bodyCells;
   }
 
@@ -105,8 +109,22 @@ public class Footprint {
       bodyCells = coveredCells(bodyBoundsPx, pinPoints.get(0));
     }
 
+    boolean rotatable = stretchable || hasRotationTransformer(component);
+
     return new Footprint(component, Collections.unmodifiableList(pinIndices),
-        Collections.unmodifiableList(pinOffsets), onGrid, stretchable, bodyCells);
+        Collections.unmodifiableList(pinOffsets), onGrid, stretchable, rotatable, bodyCells);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static boolean hasRotationTransformer(IDIYComponent<?> component) {
+    try {
+      ComponentType type = ComponentProcessor.getInstance()
+          .extractComponentTypeFrom((Class<? extends IDIYComponent<?>>) component.getClass());
+      return type != null && type.getTransformer() != null
+          && type.getTransformer().canRotate(component);
+    } catch (Exception e) {
+      return false;
+    }
   }
 
   /** Lattice holes the body rectangle covers, in cells relative to the reference pin. */
@@ -158,6 +176,15 @@ public class Footprint {
 
   public boolean isStretchable() {
     return stretchable;
+  }
+
+  /**
+   * True when the placer may try 90-degree orientations: either the part is stretchable (its
+   * geometry is fully derived from its two lead points) or its component type declares a
+   * transformer that can rotate it.
+   */
+  public boolean isRotatable() {
+    return rotatable;
   }
 
   /**
