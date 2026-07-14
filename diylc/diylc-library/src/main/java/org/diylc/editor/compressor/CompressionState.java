@@ -52,6 +52,9 @@ public class CompressionState {
   /** Cost per top-side jumper; the expensive resource. */
   public static final int JUMPER_WEIGHT = 50;
 
+  /** Cost per pair of jumpers that cross — untangling beats shortening. */
+  public static final int CROSSING_WEIGHT = 15;
+
   /** Cost per unit of underside wire length. */
   public static final int LENGTH_WEIGHT = 1;
 
@@ -289,13 +292,14 @@ public class CompressionState {
 
   /**
    * Score of the current, routed state: occupied bounding-box extent (columns + rows) weighted
-   * by {@link #AREA_WEIGHT}, jumpers by {@link #JUMPER_WEIGHT}, wire length by
-   * {@link #LENGTH_WEIGHT}. Lower is better.
+   * by {@link #AREA_WEIGHT}, jumpers by {@link #JUMPER_WEIGHT}, jumper crossings by
+   * {@link #CROSSING_WEIGHT}, wire length by {@link #LENGTH_WEIGHT}. Lower is better.
    */
   public long cost() {
     Rectangle bounds = grid.occupiedBounds();
     long extent = bounds == null ? 0 : (bounds.width + 1) + (bounds.height + 1);
     return AREA_WEIGHT * extent + JUMPER_WEIGHT * (long) routing.getJumperCount()
+        + CROSSING_WEIGHT * (long) routing.getJumperCrossings()
         + LENGTH_WEIGHT * (long) routing.getTotalWireLength();
   }
 }

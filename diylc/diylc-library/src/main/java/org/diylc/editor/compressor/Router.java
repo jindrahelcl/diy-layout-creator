@@ -197,7 +197,7 @@ public class Router {
         net.getFailedPins().remove(pin);
       }
     }
-    resolveFailedPins(net, netPins.get(netId));
+    resolveFailedPins(net, netPins.get(netId), routed);
   }
 
   public static final int MAX_RIP_UP = 3;
@@ -242,7 +242,7 @@ public class Router {
     int newJumpers = 0;
     for (int blocker : blockers) {
       RoutedNet rerouted = routeNet(blocker, netPins.get(blocker));
-      resolveFailedPins(rerouted, netPins.get(blocker));
+      resolveFailedPins(rerouted, netPins.get(blocker), routed);
       newJumpers += rerouted.getJumpers().size();
       routed[blocker] = rerouted;
     }
@@ -289,13 +289,17 @@ public class Router {
     return blockers;
   }
 
+  /** Extra cells of jumper length worth spending to avoid crossing another jumper. */
+  public static final int CROSSING_BIAS = 8;
+
   /**
-   * Connects each failed pin with a top-side jumper to the nearest connected cell. A jumper
-   * end never sits in a pin hole (the component's lead already occupies it) or under a body,
-   * and a hole hosts at most one jumper end — such ends escape to the nearest eligible free
-   * hole, tied to the original cell by a short underside stub run (emitted as a trace).
+   * Connects each failed pin with a top-side jumper to a connected cell, preferring near
+   * targets that don't cross the jumpers already on the board. A jumper end never sits in a
+   * pin hole (the component's lead already occupies it) or under a body, and a hole hosts at
+   * most one jumper end — such ends escape to the nearest eligible free hole, tied to the
+   * original cell by a short underside stub run (emitted as a trace).
    */
-  private void resolveFailedPins(RoutedNet net, List<Cell> pins) {
+  private void resolveFailedPins(RoutedNet net, List<Cell> pins, RoutedNet[] routed) {
     if (net.getFailedPins().isEmpty()) {
       return;
     }
@@ -309,16 +313,48 @@ public class Router {
       usedJumperHoles.add(jumper.from());
       usedJumperHoles.add(jumper.to());
     }
+    List<RoutedNet.Jumper> boardJumpers = new ArrayList<RoutedNet.Jumper>();
+    for (RoutedNet other : routed) {
+      if (other != null) {
+        boardJumpers.addAll(other.getJumpers());
+      }
+    }
     for (Cell pin : new ArrayList<Cell>(net.getFailedPins())) {
-      Cell target = nearestCell(pin, connected);
+      Cell target = bestJumperTarget(pin, connected, boardJumpers);
       Cell from = escapeHole(net, pin, target, usedJumperHoles, connected);
       Cell to = escapeHole(net, target, from, usedJumperHoles, connected);
-      net.getJumpers().add(new RoutedNet.Jumper(from, to));
+      RoutedNet.Jumper jumper = new RoutedNet.Jumper(from, to);
+      net.getJumpers().add(jumper);
+      boardJumpers.add(jumper);
       connected.add(pin);
       connected.add(from);
       connected.add(to);
     }
     net.getFailedPins().clear();
+  }
+
+  /**
+   * The connected cell to jump to: distance plus a {@link #CROSSING_BIAS} penalty for every
+   * existing jumper the new wire would cross — a slightly longer jumper beats a tangle.
+   */
+  private static Cell bestJumperTarget(Cell pin, Set<Cell> connected,
+      List<RoutedNet.Jumper> boardJumpers) {
+    Cell best = null;
+    int bestScore = Integer.MAX_VALUE;
+    for (Cell c : connected) {
+      int score = manhattan(pin, c);
+      for (RoutedNet.Jumper jumper : boardJumpers) {
+        if (RoutingResult.segmentsCross(pin, c, jumper.from(), jumper.to())) {
+          score += CROSSING_BIAS;
+        }
+      }
+      if (score < bestScore
+          || (score == bestScore && OPEN_CELL_ORDER.compare(c, best) < 0)) {
+        bestScore = score;
+        best = c;
+      }
+    }
+    return best;
   }
 
   /** How far a jumper end may move from the cell it connects, in Chebyshev cells. */
@@ -373,19 +409,6 @@ public class Router {
     }
     usedJumperHoles.add(cell);
     return cell;
-  }
-
-  private static Cell nearestCell(Cell from, Set<Cell> candidates) {
-    Cell best = null;
-    int bestDistance = Integer.MAX_VALUE;
-    for (Cell c : candidates) {
-      int d = manhattan(from, c);
-      if (d < bestDistance || (d == bestDistance && OPEN_CELL_ORDER.compare(c, best) < 0)) {
-        bestDistance = d;
-        best = c;
-      }
-    }
-    return best;
   }
 
   private static int halfPerimeter(List<Cell> pins) {

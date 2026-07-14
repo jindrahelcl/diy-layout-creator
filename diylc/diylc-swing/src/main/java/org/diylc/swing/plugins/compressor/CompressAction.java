@@ -92,7 +92,11 @@ public class CompressAction extends AbstractAction {
     sb.append(".\n");
     sb.append(stats.netCount()).append(" nets routed: ").append(stats.wireLength())
         .append(" underside wire steps, ").append(stats.jumperCount())
-        .append(" top-side jumpers.\n\nUndo restores the original layout.");
+        .append(" top-side jumpers");
+    if (stats.jumperCrossings() > 0) {
+      sb.append(" (").append(stats.jumperCrossings()).append(" crossing pairs)");
+    }
+    sb.append(".\n\nUndo restores the original layout.");
     swingUI.showMessage(sb.toString(), TITLE, ISwingUI.INFORMATION_MESSAGE);
   }
 }

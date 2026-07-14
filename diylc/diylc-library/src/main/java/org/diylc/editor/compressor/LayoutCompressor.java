@@ -70,7 +70,7 @@ public class LayoutCompressor implements IProjectEditor {
 
   /** Outcome stats for the result dialog. */
   public record Stats(Rectangle boardCells, int netCount, int wireLength, int jumperCount,
-      int movedParts, int remoteParts, int flyingWires) {
+      int jumperCrossings, int movedParts, int remoteParts, int flyingWires) {
   }
 
   private final List<ContinuityArea> continuityAreas;
@@ -257,8 +257,8 @@ public class LayoutCompressor implements IProjectEditor {
     project.getGroupsEx().addAll(scratch.getGroupsEx());
 
     stats = new Stats(emission.board() == null ? null : grid.occupiedBounds(), nets.size(),
-        routing.getTotalWireLength(), routing.getJumperCount(), placements.size(),
-        remote.size(), flyingWires);
+        routing.getTotalWireLength(), routing.getJumperCount(), routing.getJumperCrossings(),
+        placements.size(), remote.size(), flyingWires);
     return emitted;
   }
 
