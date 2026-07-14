@@ -137,7 +137,8 @@ public class Legalizer {
     return true;
   }
 
-  private static void occupy(Placement placed, GridModel grid) {
+  /** Claims the placement's pin and body cells in the grid. */
+  public static void occupy(Placement placed, GridModel grid) {
     List<Cell> pinCells = placed.pinCells();
     List<Integer> pinIndices = placed.footprint().getPinIndices();
     for (int i = 0; i < pinCells.size(); i++) {
