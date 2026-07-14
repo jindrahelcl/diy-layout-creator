@@ -32,6 +32,7 @@ import java.util.Set;
 
 import org.diylc.common.LineStyle;
 import org.diylc.components.boards.PerfBoard;
+import org.diylc.components.connectivity.CopperTrace;
 import org.diylc.components.connectivity.Jumper;
 import org.diylc.components.connectivity.PCBTerminalBlock;
 import org.diylc.components.passive.Resistor;
@@ -79,7 +80,7 @@ public class LayoutEmitterTests {
   }
 
   @Test
-  public void splitsRunsIntoStraightDashedSegments() {
+  public void splitsRunsIntoStraightTraceSegments() {
     RoutedNet net = new RoutedNet(0);
     net.getRuns().add(Arrays.asList(new Cell(0, 0), new Cell(1, 0), new Cell(2, 0),
         new Cell(2, 1), new Cell(2, 2)));
@@ -90,14 +91,12 @@ public class LayoutEmitterTests {
     Emission emission = new LayoutEmitter().emit(project, List.of(), routing, null, Set.of());
 
     assertEquals(2, emission.wires().size());
-    Jumper first = (Jumper) emission.wires().get(0);
-    Jumper second = (Jumper) emission.wires().get(1);
+    CopperTrace first = (CopperTrace) emission.wires().get(0);
+    CopperTrace second = (CopperTrace) emission.wires().get(1);
     assertEquals(new Point2D.Double(0, 0), first.getControlPoint(0));
     assertEquals(new Point2D.Double(40, 0), first.getControlPoint(1));
     assertEquals(new Point2D.Double(40, 0), second.getControlPoint(0));
     assertEquals(new Point2D.Double(40, 40), second.getControlPoint(1));
-    assertEquals(LineStyle.DASHED, first.getStyle());
-    assertEquals(LayoutEmitter.UNDERSIDE_COLOR, first.getLeadColor());
   }
 
   @Test

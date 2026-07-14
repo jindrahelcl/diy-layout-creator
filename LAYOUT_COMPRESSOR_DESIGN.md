@@ -75,7 +75,7 @@ New code only, plus one registration line in `MainFrame`. Follows existing patte
 | `Router` | A* over hole-lattice edges for one net (multi-terminal via sequential Steiner-ish extension: route each terminal to the growing tree). Obstacles: pins of other nets, underside segments of other nets, component bodies only block via their pins (wire runs may pass under bodies between holes — configurable). Fallback: top jumper terminal-to-tree. Rip-up & reroute: on fallback, try ripping the blocking nets (bounded depth) before accepting a jumper. |
 | `PlacementSeeder` | Initial placement: proportional shrink of original coordinates onto the grid + greedy legalization (nearest free slot, keep relative order). |
 | `Compressor` | The optimization loop from §2 step 5: move catalogue, incremental re-route of affected nets, annealing schedule, time budget, best-state tracking. |
-| `LayoutEmitter` | Converts final `GridModel` state back to DIYLC components: moves real parts (`setControlPoint`), creates `Jumper` components for runs (underside: dashed + dark color; top: solid red — constants, later configurable), creates `PerfBoard` (TwoPoints mode, 0.1″ spacing), orders the list board-first for z-order. |
+| `LayoutEmitter` | Converts final `GridModel` state back to DIYLC components: moves real parts (`setControlPoint`), creates `CopperTrace` components for underside runs and solid red `Jumper`s for top-side jumpers, creates `PerfBoard` (TwoPoints mode, 0.1″ spacing), orders the list board-first for z-order. |
 | `CompressorResult` | Stats for the report dialog: board size, jumper count, wire length, verification verdict. |
 
 **`diylc-swing` — `org.diylc.swing.plugins.compressor`**:
@@ -92,8 +92,10 @@ New code only, plus one registration line in `MainFrame`. Follows existing patte
 - `CompareService.compare(Netlist, Netlist)` (org.diylc.plugins.compare) — existing
   netlist-diff machinery; reused verbatim for the final verification step.
 - `IProjectEditor` + `Presenter.applyEditor` — single-shot undoable project mutation.
-- `Jumper` — 2-point `IContinuity` leaded component with editable `Color` and
-  `LineStyle` (SOLID/DASHED/DOTTED); our wire primitive for both sides.
+- `CopperTrace` — 2-point leaded conductor; underside-run primitive. Conducts via continuity
+  areas, which only exist after a draw pass — so verification scans the emitted layout.
+- `Jumper` — 2-point `IContinuity` leaded component (endpoint continuity, no draw pass
+  needed); top-side jumper and flying-wire primitive.
 - `PerfBoard` — `AbstractBoard` in TwoPoints mode with `spacing` property.
 - Sticky-point rule: two control points are connected iff within 4 px → emitted wire endpoints
   must land *exactly* on the pin coordinates they connect to.
@@ -234,8 +236,8 @@ Each milestone builds, passes existing tests, and is demoable. Sizes are rough.
   - **M3.1 — Placement seeder + legalizer:** scale original geometry onto the grid (preserves
     the author's grouping), then legalize largest-first: spiral search around each part's
     desired spot, trying rotations and stretchable spans; grows the canvas rather than fail.
-  - **M3.2 — `LayoutEmitter`:** apply placement to components, emit underside runs as dashed
-    dark `Jumper`s and top jumpers as solid red ones, add shrink-wrapped `PerfBoard`,
+  - **M3.2 — `LayoutEmitter`:** apply placement to components, emit underside runs as
+    `CopperTrace`s and top jumpers as solid red `Jumper`s, add shrink-wrapped `PerfBoard`,
     board-first z-order.
   - **M3.3 — `LayoutCompressor` editor + verification:** full pipeline as `IProjectEditor`
     (strip old wiring/boards → seed → legalize → route → emit); netlist-equality gate using

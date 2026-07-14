@@ -223,10 +223,11 @@ public class LayoutCompressor implements IProjectEditor {
     }
 
     // verification gate: netlist before == netlist after, using the compressor's own node
-    // rule; on mismatch the real project has not been touched
+    // rule; on mismatch the real project has not been touched. Emitted traces conduct via
+    // continuity areas, which only exist after a draw pass — hence the scan.
     Classification afterClassification = classifier.classify(scratch);
-    List<Group> afterNets =
-        NetExtractor.extractNets(scratch, List.of(), afterClassification.getRealParts());
+    List<Group> afterNets = NetExtractor.extractNets(scratch, ContinuityScanner.scan(scratch),
+        afterClassification.getRealParts());
     Set<Set<String>> after =
         canonical(afterNets, afterClassification.getRealParts(), null);
     if (!beforeNets.equals(after)) {

@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+import org.diylc.appframework.miscutils.ConfigurationManager;
 import org.diylc.components.boards.PerfBoard;
 import org.diylc.components.connectivity.Jumper;
 import org.diylc.components.passive.Resistor;
@@ -39,9 +40,16 @@ import org.diylc.core.Project;
 import org.diylc.netlist.Group;
 import org.diylc.netlist.Node;
 import org.diylc.presenter.ContinuityArea;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class LayoutCompressorTests {
+
+  @BeforeClass
+  public static void initConfiguration() {
+    // verification draws the scratch project through a Presenter, which needs this
+    ConfigurationManager.getInstance().initialize("diylc-test");
+  }
 
   private static Resistor resistor(String name, double x, double y) {
     Resistor resistor = new Resistor();
@@ -73,7 +81,7 @@ public class LayoutCompressorTests {
       IDIYComponent<?> c2, int p2) {
     List<IDIYComponent<?>> realParts =
         new ComponentClassifier().classify(project).getRealParts();
-    List<Group> nets = NetExtractor.extractNets(project, new ArrayList<ContinuityArea>(),
+    List<Group> nets = NetExtractor.extractNets(project, ContinuityScanner.scan(project),
         realParts);
     for (Group net : nets) {
       boolean has1 = false;

@@ -32,6 +32,7 @@ import java.util.Set;
 import org.diylc.common.ComponentType;
 import org.diylc.common.LineStyle;
 import org.diylc.components.boards.PerfBoard;
+import org.diylc.components.connectivity.CopperTrace;
 import org.diylc.components.connectivity.Jumper;
 import org.diylc.core.IDIYComponent;
 import org.diylc.core.Project;
@@ -42,14 +43,14 @@ import org.diylc.presenter.ComponentProcessor;
 /**
  * Turns the compressed state back into DIYLC components: moves placed parts onto their lattice
  * cells (rotating through the component's transformer so orientation properties stay in sync),
- * realizes underside runs as dashed dark {@link Jumper}s and top-side jumpers as solid red
- * ones, and shrink-wraps a {@link PerfBoard} around the result, board first in z-order.
+ * realizes underside runs as {@link CopperTrace}s and top-side jumpers as solid red
+ * {@link Jumper}s, and shrink-wraps a {@link PerfBoard} around the result, board first in
+ * z-order.
  *
  * @author Layout Compressor contributors
  */
 public class LayoutEmitter {
 
-  public static final Color UNDERSIDE_COLOR = new Color(70, 70, 70);
   public static final Color TOP_JUMPER_COLOR = Color.red;
   public static final int BOARD_MARGIN_CELLS = 1;
 
@@ -89,14 +90,13 @@ public class LayoutEmitter {
         }
         for (List<Cell> run : net.getRuns()) {
           for (int[] segment : segments(run, connectionCells)) {
-            wires.add(wire(GridModel.toPixels(run.get(segment[0])),
-                GridModel.toPixels(run.get(segment[1])), UNDERSIDE_COLOR, LineStyle.DASHED,
-                nextName(names)));
+            wires.add(trace(GridModel.toPixels(run.get(segment[0])),
+                GridModel.toPixels(run.get(segment[1])), nextName(names, "Trace")));
           }
         }
         for (RoutedNet.Jumper jumper : net.getJumpers()) {
           wires.add(wire(GridModel.toPixels(jumper.from()), GridModel.toPixels(jumper.to()),
-              TOP_JUMPER_COLOR, LineStyle.SOLID, nextName(names)));
+              nextName(names)));
         }
       }
     }
@@ -122,7 +122,7 @@ public class LayoutEmitter {
     for (IDIYComponent<?> component : project.getComponents()) {
       names.add(component.getName());
     }
-    IDIYComponent<?> wire = wire(from, to, TOP_JUMPER_COLOR, LineStyle.SOLID, nextName(names));
+    IDIYComponent<?> wire = wire(from, to, nextName(names));
     project.getComponents().add(wire);
     return wire;
   }
@@ -170,14 +170,21 @@ public class LayoutEmitter {
     }
   }
 
-  private static IDIYComponent<?> wire(Point2D from, Point2D to, Color color, LineStyle style,
-      String name) {
+  private static IDIYComponent<?> trace(Point2D from, Point2D to, String name) {
+    CopperTrace trace = new CopperTrace();
+    trace.setName(name);
+    trace.setControlPoint(from, 0);
+    trace.setControlPoint(to, 1);
+    return trace;
+  }
+
+  private static IDIYComponent<?> wire(Point2D from, Point2D to, String name) {
     Jumper jumper = new Jumper();
     jumper.setName(name);
     jumper.setControlPoint(from, 0);
     jumper.setControlPoint(to, 1);
-    jumper.setLeadColor(color);
-    jumper.setStyle(style);
+    jumper.setLeadColor(TOP_JUMPER_COLOR);
+    jumper.setStyle(LineStyle.SOLID);
     return jumper;
   }
 
