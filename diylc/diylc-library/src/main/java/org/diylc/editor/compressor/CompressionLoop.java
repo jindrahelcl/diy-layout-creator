@@ -52,8 +52,14 @@ public class CompressionLoop {
 
   /** Attempts the given number of random moves, keeping improvements; returns the final cost. */
   public long run(int iterations) {
+    return run(iterations, Integer.MAX_VALUE);
+  }
+
+  /** Like {@link #run(int)} but also stops once the wall-clock budget is spent. */
+  public long run(int iterations, long timeBudgetMs) {
+    long deadline = System.currentTimeMillis() + timeBudgetMs;
     long current = state.cost();
-    for (int i = 0; i < iterations; i++) {
+    for (int i = 0; i < iterations && System.currentTimeMillis() < deadline; i++) {
       Long candidate = propose();
       if (candidate == null) {
         continue;

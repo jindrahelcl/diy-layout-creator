@@ -62,6 +62,9 @@ public class LayoutCompressor implements IProjectEditor {
   /** Random moves the improvement loop attempts (greedy descent for now). */
   public static final int LOOP_ITERATIONS = 2000;
 
+  /** Hard stop for the loop on large projects; a proper budget arrives with the annealer. */
+  public static final long LOOP_TIME_BUDGET_MS = 15_000;
+
   /** Fixed loop seed: same input, same output — easier to reason about results. */
   public static final long LOOP_SEED = 42;
 
@@ -187,7 +190,7 @@ public class LayoutCompressor implements IProjectEditor {
     CompressionState state = new CompressionState(grid, legalized.placements(), fixedPinCells,
         netPins, ROUTING_MARGIN_CELLS);
     state.rerouteAll();
-    new CompressionLoop(state, LOOP_SEED).run(loopIterations);
+    new CompressionLoop(state, LOOP_SEED).run(loopIterations, LOOP_TIME_BUDGET_MS);
 
     List<Placement> placements = state.getPlacements();
     RoutingResult routing = state.getRouting();
