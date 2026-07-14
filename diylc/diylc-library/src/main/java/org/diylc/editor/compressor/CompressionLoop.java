@@ -1,0 +1,144 @@
+/*
+
+    DIY Layout Creator (DIYLC).
+    Copyright (c) 2009-2026 held jointly by the individual authors.
+
+    This file is part of DIYLC.
+
+    DIYLC is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    DIYLC is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with DIYLC.  If not, see <http://www.gnu.org/licenses/>.
+
+*/
+package org.diylc.editor.compressor;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+import org.diylc.editor.compressor.GridModel.Cell;
+import org.diylc.editor.compressor.PlacementSeeder.Placement;
+
+/**
+ * Iterative layout improvement on a routed {@link CompressionState}: random small moves
+ * (slide, rotate, stretch a lead span, re-route a net, un-jump a jumpered net), each applied
+ * incrementally and kept only when it strictly lowers the cost — plain greedy descent for now;
+ * simulated annealing replaces the acceptance rule in a later step. Deterministic for a given
+ * seed and iteration count.
+ *
+ * @author Layout Compressor contributors
+ */
+public class CompressionLoop {
+
+  private static final int[][] SLIDE_DELTAS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+
+  private final CompressionState state;
+  private final Random random;
+
+  /** The state must be fully routed (see {@link CompressionState#rerouteAll()}). */
+  public CompressionLoop(CompressionState state, long seed) {
+    this.state = state;
+    this.random = new Random(seed);
+  }
+
+  /** Attempts the given number of random moves, keeping improvements; returns the final cost. */
+  public long run(int iterations) {
+    long current = state.cost();
+    for (int i = 0; i < iterations; i++) {
+      Long candidate = propose();
+      if (candidate == null) {
+        continue;
+      }
+      if (candidate < current) {
+        current = candidate;
+      } else {
+        state.undoMove();
+      }
+    }
+    return current;
+  }
+
+  /** One random move attempt; null when it was infeasible (the state is then unchanged). */
+  private Long propose() {
+    int kind = random.nextInt(8);
+    if (kind < 4) {
+      return slide();
+    }
+    switch (kind) {
+      case 4:
+        return rotate();
+      case 5:
+        return stretch();
+      case 6:
+        return reroute();
+      default:
+        return unjump();
+    }
+  }
+
+  private Placement randomPlacement() {
+    List<Placement> placements = state.getPlacements();
+    return placements.get(random.nextInt(placements.size()));
+  }
+
+  private Long slide() {
+    Placement placement = randomPlacement();
+    int[] delta = SLIDE_DELTAS[random.nextInt(4)];
+    Cell reference = new Cell(placement.reference().col() + delta[0],
+        placement.reference().row() + delta[1]);
+    return state.tryPlacement(new Placement(placement.footprint(), reference,
+        placement.quarterTurns(), placement.span()));
+  }
+
+  private Long rotate() {
+    Placement placement = randomPlacement();
+    if (!placement.footprint().isRotatable()) {
+      return null;
+    }
+    int turns = (placement.quarterTurns() + 1 + random.nextInt(3)) % 4;
+    return state.tryPlacement(new Placement(placement.footprint(), placement.reference(),
+        turns, placement.span()));
+  }
+
+  private Long stretch() {
+    Placement placement = randomPlacement();
+    if (!placement.footprint().isStretchable()) {
+      return null;
+    }
+    int span = placement.span() + (random.nextBoolean() ? 1 : -1);
+    if (span < 1) {
+      return null;
+    }
+    return state.tryPlacement(new Placement(placement.footprint(), placement.reference(),
+        placement.quarterTurns(), span));
+  }
+
+  private Long reroute() {
+    if (state.netCount() == 0) {
+      return null;
+    }
+    return state.tryRerouteNet(random.nextInt(state.netCount()));
+  }
+
+  private Long unjump() {
+    List<Integer> jumpered = new ArrayList<Integer>();
+    for (RoutedNet net : state.getRouting().getNets()) {
+      if (!net.getJumpers().isEmpty()) {
+        jumpered.add(net.getNetId());
+      }
+    }
+    if (jumpered.isEmpty()) {
+      return null;
+    }
+    return state.tryRerouteNet(jumpered.get(random.nextInt(jumpered.size())));
+  }
+}

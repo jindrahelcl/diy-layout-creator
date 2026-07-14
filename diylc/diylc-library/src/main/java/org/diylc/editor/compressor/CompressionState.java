@@ -63,6 +63,7 @@ public class CompressionState {
   private final int routingMargin;
   private final Map<IDIYComponent<?>, Placement> placements =
       new IdentityHashMap<IDIYComponent<?>, Placement>();
+  private final List<IDIYComponent<?>> componentOrder = new ArrayList<IDIYComponent<?>>();
   private final List<List<PinRef>> netPins;
   private final Map<IDIYComponent<?>, Map<Integer, Cell>> fixedPins;
   private final Map<IDIYComponent<?>, Set<Integer>> netsOf =
@@ -91,6 +92,7 @@ public class CompressionState {
     this.fixedPins = fixedPins;
     for (Placement placement : placements) {
       this.placements.put(placement.footprint().getComponent(), placement);
+      componentOrder.add(placement.footprint().getComponent());
     }
     for (int netId = 0; netId < netPins.size(); netId++) {
       for (PinRef pin : netPins.get(netId)) {
@@ -111,8 +113,17 @@ public class CompressionState {
     return placements.get(component);
   }
 
+  /** Current placements, in a stable order (the construction order of their components). */
   public List<Placement> getPlacements() {
-    return new ArrayList<Placement>(placements.values());
+    List<Placement> result = new ArrayList<Placement>(componentOrder.size());
+    for (IDIYComponent<?> component : componentOrder) {
+      result.add(placements.get(component));
+    }
+    return result;
+  }
+
+  public int netCount() {
+    return netPins.size();
   }
 
   /** Nets with a terminal on the component; empty for components on no net. */
@@ -191,15 +202,31 @@ public class CompressionState {
     return cost();
   }
 
-  /** Reverts the last successful {@link #tryPlacement}: placement, wires, and routing. */
+  /**
+   * Rips the net out and routes it from scratch against the current wire state (rip-up of
+   * blocking nets included) — the mechanism behind the REROUTE and UNJUMP moves. Returns the
+   * resulting cost; revert with {@link #undoMove()}.
+   */
+  public Long tryRerouteNet(int netId) {
+    undo = new Undo(null, null, grid.snapshotWires(),
+        new ArrayList<RoutedNet>(routing.getNets()));
+    rerouteNets(Set.of(netId));
+    return cost();
+  }
+
+  /** Reverts the last successful try-move: placement (if one moved), wires, and routing. */
   public void undoMove() {
-    grid.vacate(undo.component());
-    Legalizer.occupy(undo.placement(), grid);
-    placements.put(undo.component(), undo.placement());
+    if (undo.component() != null) {
+      grid.vacate(undo.component());
+      Legalizer.occupy(undo.placement(), grid);
+      placements.put(undo.component(), undo.placement());
+    }
     grid.restoreWires(undo.wires());
     routing.getNets().clear();
     routing.getNets().addAll(undo.nets());
-    retagPins(netsTouching(undo.component()));
+    if (undo.component() != null) {
+      retagPins(netsTouching(undo.component()));
+    }
     undo = null;
   }
 
