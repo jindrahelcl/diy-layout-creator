@@ -100,8 +100,9 @@ public class CompressionStateTests {
 
     assertEquals(0, state.getRouting().getJumperCount());
     assertEquals(4, state.getRouting().getTotalWireLength());
-    // bounds cols 1..5, rows 1..3: extent (5 + 3) * 10, plus 4 length
-    assertEquals(84, state.cost());
+    // bounds cols 1..5, rows 1..3: extent (5 + 3) * 10, plus 4 length, plus 2 * 3 span
+    // deviation (both resistors at span 4, natural span 5)
+    assertEquals(90, state.cost());
   }
 
   @Test
@@ -128,8 +129,8 @@ public class CompressionStateTests {
 
     assertEquals(new Cell(1, 5), state.cellOf(new PinRef(b, 0)));
     assertEquals(8, state.getRouting().getTotalWireLength());
-    // bounds cols 1..5, rows 1..5: extent (5 + 5) * 10, plus 8 length
-    assertEquals(108, state.cost());
+    // bounds cols 1..5, rows 1..5: extent (5 + 5) * 10, plus 8 length, plus 6 span deviation
+    assertEquals(114, state.cost());
     assertTrue(state.getGrid().pinsAt(new Cell(1, 3)).isEmpty());
   }
 
@@ -143,12 +144,12 @@ public class CompressionStateTests {
     Long moved = state.tryPlacement(
         new Placement(state.placementOf(b).footprint(), new Cell(1, 5), 0, 4));
 
-    assertEquals(Long.valueOf(108), moved);
+    assertEquals(Long.valueOf(114), moved);
     assertEquals(8, state.getRouting().getTotalWireLength());
 
     state.undoMove();
 
-    assertEquals(84, state.cost());
+    assertEquals(90, state.cost());
     assertEquals(4, state.getRouting().getTotalWireLength());
     assertEquals(new Cell(1, 3), state.cellOf(new PinRef(b, 0)));
     assertEquals(1, state.getGrid().pinsAt(new Cell(1, 3)).size());
@@ -169,7 +170,7 @@ public class CompressionStateTests {
         new Placement(state.placementOf(b).footprint(), new Cell(1, 1), 0, 4));
 
     assertNull(moved);
-    assertEquals(84, state.cost());
+    assertEquals(90, state.cost());
     assertEquals(new Cell(1, 3), state.cellOf(new PinRef(b, 0)));
     assertEquals(1, state.getGrid().pinsAt(new Cell(1, 3)).size());
     assertEquals(Integer.valueOf(0), state.getGrid().pinNetAt(new Cell(1, 3)));

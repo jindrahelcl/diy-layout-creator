@@ -171,10 +171,17 @@ public class PlacementSeeder {
     return new Seed(placements, offGrid);
   }
 
-  /** Original lead span in cells (dominant axis, at least 1); 0 for fixed-shape parts. */
+  /**
+   * Seeded lead span in cells: the footprint's natural span — the single biggest space win,
+   * since source layouts often have wildly stretched leads — falling back to the original
+   * span (dominant axis, at least 1) when the natural span is unknown; 0 for fixed parts.
+   */
   private static int seedSpan(Footprint footprint) {
     if (!footprint.isStretchable()) {
       return 0;
+    }
+    if (footprint.getNaturalSpanCells() > 0) {
+      return footprint.getNaturalSpanCells();
     }
     Cell second = footprint.getPinOffsets().get(1);
     return Math.max(1, Math.max(Math.abs(second.col()), Math.abs(second.row())));

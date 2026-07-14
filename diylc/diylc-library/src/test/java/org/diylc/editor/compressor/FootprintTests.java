@@ -118,6 +118,22 @@ public class FootprintTests {
   }
 
   @Test
+  public void naturalSpanIsBodyLengthForAxialAndPinSpacingForRadial() {
+    Resistor resistor = new Resistor();
+    resistor.setControlPoint(new Point2D.Double(100, 100), 0);
+    resistor.setControlPoint(new Point2D.Double(500, 100), 1);
+    // 0.5" body -> 5 cells, regardless of the drawn 2" span
+    assertEquals(5, Footprint.of(resistor).getNaturalSpanCells());
+
+    org.diylc.components.passive.TantalumCapacitor capacitor =
+        new org.diylc.components.passive.TantalumCapacitor();
+    capacitor.setControlPoint(new Point2D.Double(100, 100), 0);
+    capacitor.setControlPoint(new Point2D.Double(300, 100), 1);
+    // radial: designed lead spacing 0.1" -> 1 cell, not the fat body's diameter
+    assertEquals(1, Footprint.of(capacitor).getNaturalSpanCells());
+  }
+
+  @Test
   public void radialBodyBlocksHolesAroundThePins() {
     org.diylc.components.passive.TantalumCapacitor capacitor =
         new org.diylc.components.passive.TantalumCapacitor();

@@ -55,6 +55,9 @@ public class CompressionState {
   /** Cost per pair of jumpers that cross — untangling beats shortening. */
   public static final int CROSSING_WEIGHT = 15;
 
+  /** Cost per cell a stretchable part's span deviates from its natural span. */
+  public static final int SPAN_WEIGHT = 3;
+
   /** Cost per unit of underside wire length. */
   public static final int LENGTH_WEIGHT = 1;
 
@@ -293,13 +296,23 @@ public class CompressionState {
   /**
    * Score of the current, routed state: occupied bounding-box extent (columns + rows) weighted
    * by {@link #AREA_WEIGHT}, jumpers by {@link #JUMPER_WEIGHT}, jumper crossings by
-   * {@link #CROSSING_WEIGHT}, wire length by {@link #LENGTH_WEIGHT}. Lower is better.
+   * {@link #CROSSING_WEIGHT}, span deviations from natural by {@link #SPAN_WEIGHT}, wire
+   * length by {@link #LENGTH_WEIGHT}. Lower is better.
    */
   public long cost() {
     Rectangle bounds = grid.occupiedBounds();
     long extent = bounds == null ? 0 : (bounds.width + 1) + (bounds.height + 1);
+    long spanDeviation = 0;
+    for (IDIYComponent<?> component : componentOrder) {
+      Placement placement = placements.get(component);
+      int natural = placement.footprint().getNaturalSpanCells();
+      if (placement.footprint().isStretchable() && natural > 0) {
+        spanDeviation += Math.abs(placement.span() - natural);
+      }
+    }
     return AREA_WEIGHT * extent + JUMPER_WEIGHT * (long) routing.getJumperCount()
         + CROSSING_WEIGHT * (long) routing.getJumperCrossings()
+        + SPAN_WEIGHT * spanDeviation
         + LENGTH_WEIGHT * (long) routing.getTotalWireLength();
   }
 }

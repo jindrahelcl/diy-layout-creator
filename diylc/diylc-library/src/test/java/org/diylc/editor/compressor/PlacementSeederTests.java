@@ -87,10 +87,14 @@ public class PlacementSeederTests {
   }
 
   @Test
-  public void stretchablePartKeepsItsSpan() {
-    Footprint footprint = Footprint.of(resistorAt(100, 100));
+  public void seedNormalizesSpanToNaturalLength() {
+    // obscenely stretched resistor (2" pin to pin) seeds at its natural span: the 0.5" body
+    // with leads bent straight down at its ends = 5 cells
+    Resistor stretched = new Resistor();
+    stretched.setControlPoint(new Point2D.Double(100, 100), 0);
+    stretched.setControlPoint(new Point2D.Double(500, 100), 1);
 
-    Seed seed = new PlacementSeeder().seed(List.of(footprint));
+    Seed seed = new PlacementSeeder().seed(List.of(Footprint.of(stretched)));
 
     assertEquals(5, seed.placements().get(0).span());
   }

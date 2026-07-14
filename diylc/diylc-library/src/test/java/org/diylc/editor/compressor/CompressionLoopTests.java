@@ -63,7 +63,8 @@ public class CompressionLoopTests {
     Resistor b = resistorAt(100, 900);
     CompressionState state = sprawlingState(a, b);
     long initial = state.cost();
-    assertEquals(156, initial);
+    // extent (5 + 9) * 10 + 10 wire + 6 span deviation (spans 4, natural 5)
+    assertEquals(162, initial);
 
     long finalCost = new CompressionLoop(state, 42).run(300);
 

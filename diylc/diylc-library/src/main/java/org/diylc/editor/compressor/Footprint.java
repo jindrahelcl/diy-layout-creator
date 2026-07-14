@@ -30,6 +30,7 @@ import java.util.List;
 
 import org.diylc.common.ComponentType;
 import org.diylc.components.AbstractLeadedComponent;
+import org.diylc.components.passive.AbstractRadialComponent;
 import org.diylc.core.IDIYComponent;
 import org.diylc.editor.compressor.GridModel.Cell;
 import org.diylc.presenter.ComponentProcessor;
@@ -62,10 +63,11 @@ public class Footprint {
   private final Rectangle bodyCells;
   private final double bodyLengthCells;
   private final double bodyWidthCells;
+  private final int naturalSpanCells;
 
   private Footprint(IDIYComponent<?> component, List<Integer> pinIndices, List<Cell> pinOffsets,
       boolean onGrid, boolean stretchable, boolean rotatable, Rectangle bodyCells,
-      double bodyLengthCells, double bodyWidthCells) {
+      double bodyLengthCells, double bodyWidthCells, int naturalSpanCells) {
     this.component = component;
     this.pinIndices = pinIndices;
     this.pinOffsets = pinOffsets;
@@ -75,6 +77,7 @@ public class Footprint {
     this.bodyCells = bodyCells;
     this.bodyLengthCells = bodyLengthCells;
     this.bodyWidthCells = bodyWidthCells;
+    this.naturalSpanCells = naturalSpanCells;
   }
 
   public static Footprint of(IDIYComponent<?> component) {
@@ -129,6 +132,7 @@ public class Footprint {
         bodyWidthCells = bodyShape.getHeight() / GridModel.CELL_SIZE_PX;
       }
     }
+    int naturalSpanCells = naturalSpan(component, stretchable, bodyLengthCells);
 
     Rectangle bodyCells = null;
     if (stretchable && bodyLengthCells > 0 && bodyWidthCells > 0 && pinOffsets.size() == 2) {
@@ -146,7 +150,7 @@ public class Footprint {
 
     return new Footprint(component, Collections.unmodifiableList(pinIndices),
         Collections.unmodifiableList(pinOffsets), onGrid, stretchable, rotatable, bodyCells,
-        bodyLengthCells, bodyWidthCells);
+        bodyLengthCells, bodyWidthCells, naturalSpanCells);
   }
 
   private static Rectangle2D bodyShapeBounds(IDIYComponent<?> component) {
@@ -158,6 +162,32 @@ public class Footprint {
     } catch (Exception e) {
       return null;
     }
+  }
+
+  /**
+   * The span (in cells) the part wants when nothing is in the way: radial parts sit at their
+   * designed lead spacing; axial parts at the first holes clear of the body, with the leads
+   * bent straight down. 0 when unknown — the placer then keeps the layout's original span.
+   */
+  private static int naturalSpan(IDIYComponent<?> component, boolean stretchable,
+      double bodyLengthCells) {
+    if (!stretchable) {
+      return 0;
+    }
+    if (component instanceof AbstractRadialComponent<?>) {
+      try {
+        double spacingPx =
+            ((AbstractRadialComponent<?>) component).getPinSpacing().convertToPixels();
+        return Math.max(1, (int) Math.round(spacingPx / GridModel.CELL_SIZE_PX));
+      } catch (Exception e) {
+        return 0;
+      }
+    }
+    if (bodyLengthCells > 0) {
+      // small slack absorbs renderer rounding (getClosestOdd) so a 0.5" body wants span 5
+      return Math.max(1, (int) Math.ceil(bodyLengthCells - 0.1));
+    }
+    return 0;
   }
 
   @SuppressWarnings("unchecked")
@@ -266,5 +296,14 @@ public class Footprint {
   /** Physical body extent across the lead axis in cells (fractional), or 0 when unknown. */
   public double getBodyWidthCells() {
     return bodyWidthCells;
+  }
+
+  /**
+   * The lead span (in cells) this part wants when unconstrained — designed lead spacing for
+   * radial parts, body length for axial ones — or 0 when unknown. Spans are normalized to
+   * this at seeding; deviations cost {@link CompressionState#SPAN_WEIGHT} each.
+   */
+  public int getNaturalSpanCells() {
+    return naturalSpanCells;
   }
 }
