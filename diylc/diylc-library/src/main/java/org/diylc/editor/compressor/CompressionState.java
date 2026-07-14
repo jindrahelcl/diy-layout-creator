@@ -68,6 +68,11 @@ public class CompressionState {
   private final Map<IDIYComponent<?>, Set<Integer>> netsOf =
       new IdentityHashMap<IDIYComponent<?>, Set<Integer>>();
   private RoutingResult routing;
+  private Undo undo;
+
+  private record Undo(IDIYComponent<?> component, Placement placement,
+      GridModel.WireSnapshot wires, List<RoutedNet> nets) {
+  }
 
   /**
    * @param grid grid already holding the placements' claims (as the legalizer left it)
@@ -151,6 +156,99 @@ public class CompressionState {
     grid.vacate(component);
     Legalizer.occupy(placement, grid);
     placements.put(component, placement);
+  }
+
+  /**
+   * Attempts to move a component to the candidate placement, re-routing incrementally: the
+   * component's own nets plus any net whose underside run the new pins land on. Returns the
+   * cost of the resulting state, or null when the spot is taken (pins and bodies collide;
+   * foreign wires don't — they get re-routed). A successful move can be reverted with
+   * {@link #undoMove()} until the next attempt.
+   */
+  public Long tryPlacement(Placement candidate) {
+    IDIYComponent<?> component = candidate.footprint().getComponent();
+    Placement previous = placements.get(component);
+    grid.vacate(component);
+    if (!fits(candidate)) {
+      Legalizer.occupy(previous, grid);
+      retagPins(netsTouching(component));
+      return null;
+    }
+    Undo pending = new Undo(component, previous, grid.snapshotWires(),
+        new ArrayList<RoutedNet>(routing.getNets()));
+    Legalizer.occupy(candidate, grid);
+    placements.put(component, candidate);
+
+    Set<Integer> affected = new HashSet<Integer>(netsTouching(component));
+    for (Cell cell : candidate.pinCells()) {
+      Integer displaced = grid.wireHoleNetAt(cell);
+      if (displaced != null) {
+        affected.add(displaced);
+      }
+    }
+    rerouteNets(affected);
+    undo = pending;
+    return cost();
+  }
+
+  /** Reverts the last successful {@link #tryPlacement}: placement, wires, and routing. */
+  public void undoMove() {
+    grid.vacate(undo.component());
+    Legalizer.occupy(undo.placement(), grid);
+    placements.put(undo.component(), undo.placement());
+    grid.restoreWires(undo.wires());
+    routing.getNets().clear();
+    routing.getNets().addAll(undo.nets());
+    retagPins(netsTouching(undo.component()));
+    undo = null;
+  }
+
+  /** Re-routes just the given nets (releasing their claims first), rip-up included. */
+  public void rerouteNets(Set<Integer> netIds) {
+    Rectangle bounds = grid.occupiedBounds();
+    bounds.grow(routingMargin, routingMargin);
+    new Router(grid, bounds).rerouteNets(routing, netCells(), netIds);
+  }
+
+  /**
+   * True when the placement's cells collide with no pin or body. Wire claims don't count —
+   * runs under a body are fine, and runs across a pin cell are the caller's cue to re-route
+   * that net. The component itself must already be vacated.
+   */
+  private boolean fits(Placement candidate) {
+    for (Cell cell : candidate.pinCells()) {
+      if (cell.col() < 0 || cell.row() < 0 || !cellClear(cell)) {
+        return false;
+      }
+    }
+    Rectangle body = candidate.bodyCells();
+    if (body != null) {
+      if (body.x < 0 || body.y < 0) {
+        return false;
+      }
+      for (int col = body.x; col <= body.x + body.width; col++) {
+        for (int row = body.y; row <= body.y + body.height; row++) {
+          if (!cellClear(new Cell(col, row))) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  private boolean cellClear(Cell cell) {
+    return grid.pinsAt(cell).isEmpty() && grid.bodiesAt(cell).isEmpty();
+  }
+
+  /** Restores the pin-net tags of the nets' pins after their cells were vacated. */
+  private void retagPins(Set<Integer> netIds) {
+    List<List<Cell>> cells = netCells();
+    for (int netId : netIds) {
+      for (Cell cell : cells.get(netId)) {
+        grid.setPinNet(cell, netId);
+      }
+    }
   }
 
   /** Routes every net from scratch; existing wire claims are dropped first. */

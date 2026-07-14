@@ -153,19 +153,51 @@ public class Router {
 
     RoutedNet[] routed = new RoutedNet[netPins.size()];
     for (int netId : order) {
-      RoutedNet net = routeNet(netId, netPins.get(netId));
-      routed[netId] = net;
-      for (Cell pin : new ArrayList<Cell>(net.getFailedPins())) {
-        if (tryRipUpAndReroute(netId, pin, net, netPins, routed)) {
-          net.getFailedPins().remove(pin);
-        }
-      }
-      resolveFailedPins(net, netPins.get(netId));
+      routeNetWithRipUp(netId, netPins, routed);
     }
 
     RoutingResult result = new RoutingResult();
     Collections.addAll(result.getNets(), routed);
     return result;
+  }
+
+  /**
+   * Re-routes just the given nets into the existing wire state: their claims are released and
+   * their pins re-tagged (they may have moved), then each is routed with the same rip-up
+   * fallback as {@link #routeAll} — so nets outside the subset may be re-routed too when they
+   * block the way. The result's net list (indexed by net id, as routeAll built it) is updated
+   * in place.
+   */
+  public void rerouteNets(RoutingResult result, List<List<Cell>> netPins,
+      Set<Integer> netIds) {
+    RoutedNet[] routed = result.getNets().toArray(new RoutedNet[0]);
+    for (int netId : netIds) {
+      grid.releaseNet(netId);
+      for (Cell pin : netPins.get(netId)) {
+        grid.setPinNet(pin, netId);
+      }
+    }
+
+    List<Integer> order = new ArrayList<Integer>(netIds);
+    order.sort(Comparator.comparingInt((netId) -> halfPerimeter(netPins.get((int) netId)))
+        .thenComparingInt((netId) -> (int) netId));
+    for (int netId : order) {
+      routeNetWithRipUp(netId, netPins, routed);
+    }
+
+    result.getNets().clear();
+    Collections.addAll(result.getNets(), routed);
+  }
+
+  private void routeNetWithRipUp(int netId, List<List<Cell>> netPins, RoutedNet[] routed) {
+    RoutedNet net = routeNet(netId, netPins.get(netId));
+    routed[netId] = net;
+    for (Cell pin : new ArrayList<Cell>(net.getFailedPins())) {
+      if (tryRipUpAndReroute(netId, pin, net, netPins, routed)) {
+        net.getFailedPins().remove(pin);
+      }
+    }
+    resolveFailedPins(net, netPins.get(netId));
   }
 
   public static final int MAX_RIP_UP = 3;

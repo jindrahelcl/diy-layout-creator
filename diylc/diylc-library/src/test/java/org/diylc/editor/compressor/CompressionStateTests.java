@@ -132,4 +132,82 @@ public class CompressionStateTests {
     assertEquals(108, state.cost());
     assertTrue(state.getGrid().pinsAt(new Cell(1, 3)).isEmpty());
   }
+
+  @Test
+  public void tryPlacementMovesAndUndoRestoresEverything() {
+    Resistor a = resistorAt(100, 100);
+    Resistor b = resistorAt(100, 300);
+    CompressionState state = twoResistorState(a, b);
+    state.rerouteAll();
+
+    Long moved = state.tryPlacement(
+        new Placement(state.placementOf(b).footprint(), new Cell(1, 5), 0, 4));
+
+    assertEquals(Long.valueOf(108), moved);
+    assertEquals(8, state.getRouting().getTotalWireLength());
+
+    state.undoMove();
+
+    assertEquals(84, state.cost());
+    assertEquals(4, state.getRouting().getTotalWireLength());
+    assertEquals(new Cell(1, 3), state.cellOf(new PinRef(b, 0)));
+    assertEquals(1, state.getGrid().pinsAt(new Cell(1, 3)).size());
+    assertTrue(state.getGrid().pinsAt(new Cell(1, 5)).isEmpty());
+    assertEquals(Integer.valueOf(0), state.getGrid().pinNetAt(new Cell(1, 3)));
+    assertEquals(Integer.valueOf(0), state.getGrid().wireHoleNetAt(new Cell(1, 2)));
+  }
+
+  @Test
+  public void tryPlacementRejectsCollidingSpotAndLeavesStateIntact() {
+    Resistor a = resistorAt(100, 100);
+    Resistor b = resistorAt(100, 300);
+    CompressionState state = twoResistorState(a, b);
+    state.rerouteAll();
+
+    // b onto a's exact spot: pin collision, nothing may change
+    Long moved = state.tryPlacement(
+        new Placement(state.placementOf(b).footprint(), new Cell(1, 1), 0, 4));
+
+    assertNull(moved);
+    assertEquals(84, state.cost());
+    assertEquals(new Cell(1, 3), state.cellOf(new PinRef(b, 0)));
+    assertEquals(1, state.getGrid().pinsAt(new Cell(1, 3)).size());
+    assertEquals(Integer.valueOf(0), state.getGrid().pinNetAt(new Cell(1, 3)));
+  }
+
+  @Test
+  public void tryPlacementDisplacesForeignRunsAndReroutesThem() {
+    Resistor a = resistorAt(100, 100);
+    Resistor b = resistorAt(100, 300);
+    Resistor c = resistorAt(100, 500);
+    Placement pa = new Placement(Footprint.of(a), new Cell(1, 1), 0, 4);
+    Placement pb = new Placement(Footprint.of(b), new Cell(1, 3), 0, 4);
+    Placement pc = new Placement(Footprint.of(c), new Cell(3, 5), 0, 4);
+    Legalizer.Result legalized = new Legalizer().legalize(List.of(pa, pb, pc));
+    List<List<PinRef>> nets = List.of(
+        List.of(new PinRef(a, 0), new PinRef(b, 0)),
+        List.of(new PinRef(a, 1), new PinRef(b, 1)));
+    CompressionState state = new CompressionState(legalized.grid(), legalized.placements(),
+        new HashMap<>(), nets, 1);
+    state.rerouteAll();
+    assertEquals(Integer.valueOf(0), state.getGrid().wireHoleNetAt(new Cell(1, 2)));
+    assertEquals(Integer.valueOf(1), state.getGrid().wireHoleNetAt(new Cell(5, 2)));
+
+    // c's new pins land exactly on both nets' straight runs; both must re-route around them
+    Long moved = state.tryPlacement(new Placement(pc.footprint(), new Cell(1, 2), 0, 4));
+
+    assertEquals(0, state.getRouting().getJumperCount());
+    assertTrue(moved != null);
+    assertNull(state.getGrid().wireHoleNetAt(new Cell(1, 2)));
+    assertNull(state.getGrid().wireHoleNetAt(new Cell(5, 2)));
+    for (RoutedNet net : state.getRouting().getNets()) {
+      assertTrue(net.getFailedPins().isEmpty());
+    }
+
+    state.undoMove();
+
+    assertEquals(Integer.valueOf(0), state.getGrid().wireHoleNetAt(new Cell(1, 2)));
+    assertEquals(Integer.valueOf(1), state.getGrid().wireHoleNetAt(new Cell(5, 2)));
+    assertEquals(new Cell(3, 5), state.placementOf(c).reference());
+  }
 }
