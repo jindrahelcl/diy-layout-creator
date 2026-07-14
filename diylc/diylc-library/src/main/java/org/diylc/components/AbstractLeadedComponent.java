@@ -507,7 +507,16 @@ public abstract class AbstractLeadedComponent<T> extends AbstractLabeledComponen
    * @return shape that represents component body. Shape should not be transformed and should be
    *         referenced to (0, 0).
    */
-  protected abstract Shape getBodyShape();   
+  protected abstract Shape getBodyShape();
+
+  /**
+   * Bounding box of {@link #getBodyShape()} as drawn — length along the lead axis, width across
+   * it — or null when the component has no body.
+   */
+  public Rectangle2D getBodyShapeBounds() {
+    Shape shape = getBodyShape();
+    return shape == null ? null : shape.getBounds2D();
+  }
 
   /**
    * Controls how component shape should be placed relative to start and end point.

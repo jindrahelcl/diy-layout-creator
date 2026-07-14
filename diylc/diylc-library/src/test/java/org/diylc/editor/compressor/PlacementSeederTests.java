@@ -108,16 +108,34 @@ public class PlacementSeederTests {
 
   @Test
   public void placementRotatesBodyCells() {
-    Resistor resistor = resistorAt(100, 100);
-    // body from px 120..180 x 90..110: cells 1..4 x 0..0 relative to pin 0
-    Footprint footprint = Footprint.of(resistor,
-        new java.awt.geom.Rectangle2D.Double(120, 90, 60, 20));
+    // default resistor body is 0.5" x 0.125" = 5 x 1.25 cells centered between the pins: at
+    // span 5 it covers the full pin-to-pin range in a single row, plus the lead strip
+    Footprint footprint = Footprint.of(resistorAt(100, 100));
 
     Placement flat = new Placement(footprint, new Cell(10, 10), 0, 5);
-    assertEquals(new Rectangle(11, 10, 3, 0), flat.bodyCells());
+    assertEquals(Arrays.asList(new Rectangle(11, 10, 3, 0), new Rectangle(10, 10, 5, 0)),
+        flat.bodyCells());
 
     Placement turned = new Placement(footprint, new Cell(10, 10), 1, 5);
-    assertEquals(new Rectangle(10, 11, 0, 3), turned.bodyCells());
+    assertEquals(Arrays.asList(new Rectangle(10, 11, 0, 3), new Rectangle(10, 10, 0, 5)),
+        turned.bodyCells());
+  }
+
+  @Test
+  public void radialBodyKeepsItsSizeWhateverTheSpan() {
+    org.diylc.components.passive.TantalumCapacitor capacitor =
+        new org.diylc.components.passive.TantalumCapacitor();
+    capacitor.setControlPoint(new java.awt.geom.Point2D.Double(100, 100), 0);
+    capacitor.setControlPoint(new java.awt.geom.Point2D.Double(200, 100), 1);
+    Footprint footprint = Footprint.of(capacitor);
+
+    // squeezed to span 1 the fat round body still blocks holes around the pins, not just the
+    // (empty) strip between them
+    Placement tight = new Placement(footprint, new Cell(10, 10), 0, 1);
+    assertEquals(1, tight.bodyCells().size());
+    Rectangle body = tight.bodyCells().get(0);
+    assertTrue("body should span rows around the pin row", body.height >= 1);
+    assertTrue("body should cover the pins", body.width >= 1);
   }
 
   @Test

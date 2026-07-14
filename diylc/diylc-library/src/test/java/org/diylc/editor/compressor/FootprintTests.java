@@ -101,17 +101,51 @@ public class FootprintTests {
   }
 
   @Test
-  public void bodyCellsCoverBlockedHoles() {
+  public void stretchableBodyComesFromComponentModelNotOutline() {
     Resistor resistor = new Resistor();
     resistor.setControlPoint(new Point2D.Double(100, 100), 0);
     resistor.setControlPoint(new Point2D.Double(200, 100), 1);
 
-    // body from x=110..190, y=90..110 relative to the layout: covers holes 1..4 in row 0
+    // default resistor body is 0.5" x 0.125": 5 x 1.25 cells, centered between the pins;
+    // provided outline bounds (which include the leads) are ignored for stretchable parts
     Footprint footprint =
         Footprint.of(resistor, new java.awt.geom.Rectangle2D.Double(110, 90, 80, 20));
 
-    assertEquals(new java.awt.Rectangle(1, 0, 3, 0), footprint.getBodyCells());
-    assertEquals(null, Footprint.of(resistor).getBodyCells());
+    assertEquals(5.0, footprint.getBodyLengthCells(), 0.01);
+    assertEquals(1.25, footprint.getBodyWidthCells(), 0.01);
+    assertEquals(new java.awt.Rectangle(0, 0, 5, 0), footprint.getBodyCells());
+    assertEquals(footprint.getBodyCells(), Footprint.of(resistor).getBodyCells());
+  }
+
+  @Test
+  public void radialBodyBlocksHolesAroundThePins() {
+    org.diylc.components.passive.TantalumCapacitor capacitor =
+        new org.diylc.components.passive.TantalumCapacitor();
+    capacitor.setControlPoint(new Point2D.Double(100, 100), 0);
+    capacitor.setControlPoint(new Point2D.Double(120, 100), 1);
+
+    Footprint footprint = Footprint.of(capacitor);
+
+    assertTrue(footprint.isStretchable());
+    // the fat round body must claim more than the strip between the two pins
+    assertTrue(footprint.getBodyWidthCells() > 1);
+    java.awt.Rectangle body = footprint.getBodyCells();
+    assertTrue(body.height >= 1);
+  }
+
+  @Test
+  public void coveredCellsClaimEveryIntrudedHole() {
+    // a 2-cell-wide body centered between two holes reaches exactly to the neighbors' cell
+    // boundaries: only the two holes under it are claimed
+    assertEquals(new java.awt.Rectangle(0, 0, 1, 0),
+        Footprint.coveredCells(0.5, 0, 1.0, 0.1));
+    // a 1.25-cell body centered on a hole intrudes only 0.125 cells into the neighbors —
+    // within tolerance, single row
+    assertEquals(new java.awt.Rectangle(0, 0, 0, 0),
+        Footprint.coveredCells(0, 0, 0.625, 0.625));
+    // a 2.5-cell round body centered on a hole intrudes deep into the neighbors: 3x3 holes
+    assertEquals(new java.awt.Rectangle(-1, -1, 2, 2),
+        Footprint.coveredCells(0, 0, 1.25, 1.25));
   }
 
   @Test

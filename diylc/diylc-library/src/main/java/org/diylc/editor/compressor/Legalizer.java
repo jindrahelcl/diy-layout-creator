@@ -121,8 +121,7 @@ public class Legalizer {
         return false;
       }
     }
-    Rectangle body = candidate.bodyCells();
-    if (body != null) {
+    for (Rectangle body : candidate.bodyCells()) {
       if (body.x < 0 || body.y < 0) {
         return false;
       }
@@ -144,8 +143,7 @@ public class Legalizer {
     for (int i = 0; i < pinCells.size(); i++) {
       grid.occupyPin(pinCells.get(i), placed.footprint().getComponent(), pinIndices.get(i));
     }
-    Rectangle body = placed.bodyCells();
-    if (body != null) {
+    for (Rectangle body : placed.bodyCells()) {
       for (int col = body.x; col <= body.x + body.width; col++) {
         for (int row = body.y; row <= body.y + body.height; row++) {
           Cell cell = new Cell(col, row);

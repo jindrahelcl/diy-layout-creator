@@ -45,6 +45,14 @@ import org.diylc.presenter.ComponentProcessor;
  */
 public class Footprint {
 
+  /**
+   * Bodies are shrunk by this much per side (in cells; 0.15 cells = 3 px = 0.015") before
+   * claiming holes: nominal drawn sizes, border strokes and renderer rounding shouldn't count
+   * as intrusion into a neighboring cell, or a standard 0.125"-wide resistor would block three
+   * rows. Anything intruding deeper genuinely collides.
+   */
+  private static final double BODY_TOLERANCE_CELLS = 0.15;
+
   private final IDIYComponent<?> component;
   private final List<Integer> pinIndices;
   private final List<Cell> pinOffsets;
@@ -52,9 +60,12 @@ public class Footprint {
   private final boolean stretchable;
   private final boolean rotatable;
   private final Rectangle bodyCells;
+  private final double bodyLengthCells;
+  private final double bodyWidthCells;
 
   private Footprint(IDIYComponent<?> component, List<Integer> pinIndices, List<Cell> pinOffsets,
-      boolean onGrid, boolean stretchable, boolean rotatable, Rectangle bodyCells) {
+      boolean onGrid, boolean stretchable, boolean rotatable, Rectangle bodyCells,
+      double bodyLengthCells, double bodyWidthCells) {
     this.component = component;
     this.pinIndices = pinIndices;
     this.pinOffsets = pinOffsets;
@@ -62,6 +73,8 @@ public class Footprint {
     this.stretchable = stretchable;
     this.rotatable = rotatable;
     this.bodyCells = bodyCells;
+    this.bodyLengthCells = bodyLengthCells;
+    this.bodyWidthCells = bodyWidthCells;
   }
 
   public static Footprint of(IDIYComponent<?> component) {
@@ -104,15 +117,47 @@ public class Footprint {
       onGrid = true;
     }
 
+    // a stretchable part's leads (and thus its drawn outline) tell nothing about the body, so
+    // its physical body size comes from the component model instead: the body shape is drawn
+    // centered between the pins, length along the lead axis, width across it
+    double bodyLengthCells = 0;
+    double bodyWidthCells = 0;
+    if (stretchable) {
+      Rectangle2D bodyShape = bodyShapeBounds(component);
+      if (bodyShape != null) {
+        bodyLengthCells = bodyShape.getWidth() / GridModel.CELL_SIZE_PX;
+        bodyWidthCells = bodyShape.getHeight() / GridModel.CELL_SIZE_PX;
+      }
+    }
+
     Rectangle bodyCells = null;
-    if (bodyBoundsPx != null && !pinPoints.isEmpty()) {
+    if (stretchable && bodyLengthCells > 0 && bodyWidthCells > 0 && pinOffsets.size() == 2) {
+      // body centered between the original pins, axis along the dominant pin direction
+      Cell second = pinOffsets.get(1);
+      boolean horizontal = Math.abs(second.col()) >= Math.abs(second.row());
+      bodyCells = coveredCells(second.col() / 2.0, second.row() / 2.0,
+          (horizontal ? bodyLengthCells : bodyWidthCells) / 2,
+          (horizontal ? bodyWidthCells : bodyLengthCells) / 2);
+    } else if (bodyBoundsPx != null && !pinPoints.isEmpty()) {
       bodyCells = coveredCells(bodyBoundsPx, pinPoints.get(0));
     }
 
     boolean rotatable = stretchable || hasRotationTransformer(component);
 
     return new Footprint(component, Collections.unmodifiableList(pinIndices),
-        Collections.unmodifiableList(pinOffsets), onGrid, stretchable, rotatable, bodyCells);
+        Collections.unmodifiableList(pinOffsets), onGrid, stretchable, rotatable, bodyCells,
+        bodyLengthCells, bodyWidthCells);
+  }
+
+  private static Rectangle2D bodyShapeBounds(IDIYComponent<?> component) {
+    if (!(component instanceof AbstractLeadedComponent<?>)) {
+      return null;
+    }
+    try {
+      return ((AbstractLeadedComponent<?>) component).getBodyShapeBounds();
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   @SuppressWarnings("unchecked")
@@ -127,12 +172,27 @@ public class Footprint {
     }
   }
 
-  /** Lattice holes the body rectangle covers, in cells relative to the reference pin. */
   private static Rectangle coveredCells(Rectangle2D boundsPx, Point2D referencePin) {
-    int minCol = (int) Math.ceil((boundsPx.getMinX() - referencePin.getX()) / GridModel.CELL_SIZE_PX);
-    int maxCol = (int) Math.floor((boundsPx.getMaxX() - referencePin.getX()) / GridModel.CELL_SIZE_PX);
-    int minRow = (int) Math.ceil((boundsPx.getMinY() - referencePin.getY()) / GridModel.CELL_SIZE_PX);
-    int maxRow = (int) Math.floor((boundsPx.getMaxY() - referencePin.getY()) / GridModel.CELL_SIZE_PX);
+    return coveredCells((boundsPx.getCenterX() - referencePin.getX()) / GridModel.CELL_SIZE_PX,
+        (boundsPx.getCenterY() - referencePin.getY()) / GridModel.CELL_SIZE_PX,
+        boundsPx.getWidth() / 2 / GridModel.CELL_SIZE_PX,
+        boundsPx.getHeight() / 2 / GridModel.CELL_SIZE_PX);
+  }
+
+  /**
+   * Lattice holes blocked by a body rectangle (in cell coordinates): every hole whose 0.1"
+   * square region the (tolerance-shrunk) body intersects, not just holes the body covers —
+   * two bodies that physically overlap by more than the tolerance are then guaranteed to
+   * share a blocked hole. Null when empty.
+   */
+  static Rectangle coveredCells(double centerCol, double centerRow, double halfCols,
+      double halfRows) {
+    double effectiveHalfCols = Math.max(0, halfCols - BODY_TOLERANCE_CELLS);
+    double effectiveHalfRows = Math.max(0, halfRows - BODY_TOLERANCE_CELLS);
+    int minCol = (int) Math.ceil(centerCol - effectiveHalfCols - 0.5);
+    int maxCol = (int) Math.floor(centerCol + effectiveHalfCols + 0.5);
+    int minRow = (int) Math.ceil(centerRow - effectiveHalfRows - 0.5);
+    int maxRow = (int) Math.floor(centerRow + effectiveHalfRows + 0.5);
     if (minCol > maxCol || minRow > maxRow) {
       return null;
     }
@@ -193,5 +253,18 @@ public class Footprint {
    */
   public Rectangle getBodyCells() {
     return bodyCells;
+  }
+
+  /**
+   * Physical body extent along the lead axis in cells (fractional), or 0 when unknown. Only
+   * set for stretchable parts; the body keeps this size whatever span the placer picks.
+   */
+  public double getBodyLengthCells() {
+    return bodyLengthCells;
+  }
+
+  /** Physical body extent across the lead axis in cells (fractional), or 0 when unknown. */
+  public double getBodyWidthCells() {
+    return bodyWidthCells;
   }
 }

@@ -248,8 +248,7 @@ public class CompressionState {
         return false;
       }
     }
-    Rectangle body = candidate.bodyCells();
-    if (body != null) {
+    for (Rectangle body : candidate.bodyCells()) {
       if (body.x < 0 || body.y < 0) {
         return false;
       }

@@ -65,26 +65,34 @@ public class PlacementSeeder {
     }
 
     /**
-     * Absolute cells covered by the body, or null when the footprint has no body extent. A
-     * stretchable part's body is the strip between its two pins, so it follows the chosen
-     * span rather than the footprint's original extent.
+     * Absolute cell rectangles blocked by the body; empty when the footprint has no body
+     * extent. A stretchable part blocks the lead strip between its two pins plus its physical
+     * body — a fixed-size rectangle centered between the pins (radial parts are much fatter
+     * than the strip), which keeps its size whatever span is chosen.
      */
-    public Rectangle bodyCells() {
-      Rectangle body;
+    public List<Rectangle> bodyCells() {
+      List<Rectangle> body = new ArrayList<Rectangle>(2);
       if (footprint.isStretchable()) {
-        if (span < 2) {
-          return null;
+        if (span >= 2) {
+          body.add(new Rectangle(1, 0, span - 2, 0));
         }
-        body = new Rectangle(1, 0, span - 2, 0);
-      } else {
-        body = footprint.getBodyCells();
-        if (body == null) {
-          return null;
+        if (footprint.getBodyLengthCells() > 0 && footprint.getBodyWidthCells() > 0) {
+          Rectangle physical = Footprint.coveredCells(span / 2.0, 0,
+              footprint.getBodyLengthCells() / 2, footprint.getBodyWidthCells() / 2);
+          if (physical != null) {
+            body.add(physical);
+          }
         }
+      } else if (footprint.getBodyCells() != null) {
+        body.add(footprint.getBodyCells());
       }
-      Rectangle rotated = rotateRect(body, quarterTurns);
-      return new Rectangle(reference.col() + rotated.x, reference.row() + rotated.y,
-          rotated.width, rotated.height);
+      List<Rectangle> result = new ArrayList<Rectangle>(body.size());
+      for (Rectangle rect : body) {
+        Rectangle rotated = rotateRect(rect, quarterTurns);
+        result.add(new Rectangle(reference.col() + rotated.x, reference.row() + rotated.y,
+            rotated.width, rotated.height));
+      }
+      return result;
     }
 
     private static List<Cell> rotate(List<Cell> offsets, int quarterTurns) {
