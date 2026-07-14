@@ -55,7 +55,7 @@ public class GridModel {
   public record Pin(IDIYComponent<?> component, int pointIndex) {
   }
 
-  /** An undirected lattice edge between two orthogonally adjacent cells. */
+  /** An undirected lattice edge between two adjacent cells, orthogonal or 45° diagonal. */
   public record Edge(Cell a, Cell b) {
     public static Edge between(Cell c1, Cell c2) {
       if (c1.col() < c2.col() || (c1.col() == c2.col() && c1.row() <= c2.row())) {
@@ -117,10 +117,30 @@ public class GridModel {
     return pinNets.get(cell);
   }
 
-  /** True if an underside run of the given net may traverse this lattice edge. */
+  /**
+   * True if an underside run of the given net may traverse this lattice edge. A diagonal edge
+   * is also blocked by a foreign net on the opposite diagonal of the same grid square — the
+   * two bare wires would cross mid-square and short.
+   */
   public boolean canUseEdge(int netId, Cell from, Cell to) {
     Integer owner = wireEdges.get(Edge.between(from, to));
-    return owner == null || owner == netId;
+    if (owner != null && owner != netId) {
+      return false;
+    }
+    Integer crossingOwner = wireCrossingNetAt(from, to);
+    return crossingOwner == null || crossingOwner == netId;
+  }
+
+  /** Net owning the opposite diagonal of the edge's grid square, or null (also for
+   * orthogonal edges, which nothing crosses). */
+  public Integer wireCrossingNetAt(Cell from, Cell to) {
+    int dc = to.col() - from.col();
+    int dr = to.row() - from.row();
+    if (dc == 0 || dr == 0) {
+      return null;
+    }
+    return wireEdges.get(Edge.between(new Cell(from.col() + dc, from.row()),
+        new Cell(from.col(), from.row() + dr)));
   }
 
   /**

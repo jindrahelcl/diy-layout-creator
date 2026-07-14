@@ -104,6 +104,26 @@ public class GridModelTests {
   }
 
   @Test
+  public void crossingDiagonalsExcludeForeignNets() {
+    GridModel model = new GridModel();
+    // net 0 runs diagonally through the square (2,2)-(3,3)
+    model.claimRun(0, java.util.List.of(new Cell(2, 2), new Cell(3, 3)));
+
+    // the opposite diagonal of that square is blocked for foreign nets, open for net 0
+    assertFalse(model.canUseEdge(1, new Cell(3, 2), new Cell(2, 3)));
+    assertTrue(model.canUseEdge(0, new Cell(3, 2), new Cell(2, 3)));
+    assertEquals(Integer.valueOf(0), model.wireCrossingNetAt(new Cell(3, 2), new Cell(2, 3)));
+
+    // a diagonal in the adjacent square doesn't cross it
+    assertTrue(model.canUseEdge(1, new Cell(3, 3), new Cell(4, 2)));
+    // orthogonal edges cross nothing
+    assertNull(model.wireCrossingNetAt(new Cell(2, 3), new Cell(3, 3)));
+
+    model.releaseNet(0);
+    assertTrue(model.canUseEdge(1, new Cell(3, 2), new Cell(2, 3)));
+  }
+
+  @Test
   public void pinsBlockForeignRuns() {
     GridModel model = new GridModel();
     Resistor resistor = new Resistor();
