@@ -96,6 +96,26 @@ public class GridModel {
     bodies.computeIfAbsent(cell, (c) -> new HashSet<IDIYComponent<?>>()).add(component);
   }
 
+  /**
+   * Removes every pin and body claim of the component, so it can be re-placed elsewhere. A
+   * cell's pin-net assignment is dropped once no pins remain there. Wire claims are untouched —
+   * release the affected nets separately.
+   */
+  public void vacate(IDIYComponent<?> component) {
+    pins.entrySet().removeIf((entry) -> {
+      entry.getValue().removeIf((pin) -> pin.component() == component);
+      if (entry.getValue().isEmpty()) {
+        pinNets.remove(entry.getKey());
+        return true;
+      }
+      return false;
+    });
+    bodies.entrySet().removeIf((entry) -> {
+      entry.getValue().remove(component);
+      return entry.getValue().isEmpty();
+    });
+  }
+
   public List<Pin> pinsAt(Cell cell) {
     return pins.getOrDefault(cell, Collections.emptyList());
   }

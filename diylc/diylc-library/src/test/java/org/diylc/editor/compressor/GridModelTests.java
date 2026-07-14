@@ -83,6 +83,35 @@ public class GridModelTests {
   }
 
   @Test
+  public void vacateFreesOnlyTheComponentsCells() {
+    GridModel model = new GridModel();
+    Resistor moved = new Resistor();
+    Resistor other = new Resistor();
+    model.occupyPin(new Cell(5, 5), moved, 0);
+    model.occupyBody(new Cell(6, 5), moved);
+    model.occupyPin(new Cell(7, 5), moved, 1);
+    model.setPinNet(new Cell(5, 5), 0);
+    model.occupyPin(new Cell(5, 7), other, 0);
+    model.occupyBody(new Cell(6, 5), other);
+    model.setPinNet(new Cell(5, 7), 1);
+    // a wire run through one of the vacated cells must survive the vacate
+    model.claimRun(0, java.util.List.of(new Cell(4, 5), new Cell(5, 5)));
+
+    model.vacate(moved);
+
+    assertTrue(model.pinsAt(new Cell(5, 5)).isEmpty());
+    assertTrue(model.pinsAt(new Cell(7, 5)).isEmpty());
+    assertNull(model.pinNetAt(new Cell(5, 5)));
+    assertFalse(model.bodiesAt(new Cell(6, 5)).contains(moved));
+    // the shared body cell and the other component stay occupied
+    assertTrue(model.bodiesAt(new Cell(6, 5)).contains(other));
+    assertEquals(1, model.pinsAt(new Cell(5, 7)).size());
+    assertEquals(Integer.valueOf(1), model.pinNetAt(new Cell(5, 7)));
+    assertEquals(Integer.valueOf(0), model.wireHoleNetAt(new Cell(5, 5)));
+    assertEquals(new Rectangle(4, 5, 2, 2), model.occupiedBounds());
+  }
+
+  @Test
   public void wireRunsClaimEdgesAndHolesPerNet() {
     GridModel model = new GridModel();
     // net 0 runs horizontally through (2,2)..(4,2)
