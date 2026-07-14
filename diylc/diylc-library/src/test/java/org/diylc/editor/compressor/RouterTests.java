@@ -23,6 +23,7 @@ package org.diylc.editor.compressor;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -60,7 +61,8 @@ public class RouterTests {
 
     List<Cell> path = router.findPath(0, new Cell(1, 5), Set.of(new Cell(6, 5)));
 
-    assertTrue(path.size() > 6);
+    // diagonal steps dodge the pin without needing extra cells
+    assertEquals(6, path.size());
     assertTrue(!path.contains(new Cell(3, 5)));
   }
 
@@ -104,7 +106,7 @@ public class RouterTests {
   public void prefersFewerTurns() {
     Router router = new Router(new GridModel(), BOUNDS);
 
-    // L-shaped route: any monotone staircase has equal length, fewest turns wins
+    // three diagonal steps and one straight reach (5,4); fewest turns wins among equal cost
     List<Cell> path = router.findPath(0, new Cell(1, 1), Set.of(new Cell(5, 4)));
 
     int turns = 0;
@@ -117,8 +119,25 @@ public class RouterTests {
         turns++;
       }
     }
-    assertEquals(8, path.size());
+    assertEquals(5, path.size());
     assertEquals(1, turns);
+  }
+
+  @Test
+  public void routesDontCrossForeignDiagonals() {
+    GridModel grid = new GridModel();
+    // net 0 claims the main diagonal; the opposite diagonals of its squares are off limits,
+    // so net 1 must go around the claimed run's end, not squeeze across it
+    grid.claimRun(0, List.of(new Cell(0, 0), new Cell(1, 1), new Cell(2, 2)));
+    Router router = new Router(grid, new Rectangle(0, 0, 3, 3));
+
+    List<Cell> path = router.findPath(1, new Cell(2, 0), Set.of(new Cell(0, 2)));
+
+    assertNotNull(path);
+    assertTrue(!path.contains(new Cell(1, 1)));
+    for (int i = 1; i < path.size(); i++) {
+      assertNull(grid.wireCrossingNetAt(path.get(i - 1), path.get(i)));
+    }
   }
 
   @Test
@@ -225,8 +244,8 @@ public class RouterTests {
     RoutingResult result = router.routeAll(nets);
 
     assertEquals(0, result.getJumperCount());
-    // vertical net straight (4) + horizontal net detouring around it (10)
-    assertEquals(14, result.getTotalWireLength());
+    // vertical net straight (4) + horizontal net detouring diagonally around it (6)
+    assertEquals(10, result.getTotalWireLength());
   }
 
   @Test

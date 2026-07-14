@@ -36,19 +36,28 @@ import java.util.Set;
 import org.diylc.editor.compressor.GridModel.Cell;
 
 /**
- * Routes underside wire runs on the {@link GridModel} lattice with A*. Runs cost
- * {@link #STEP_COST} per lattice step plus {@link #TURN_COST} per direction change (straight
- * runs are easier to solder); they may not leave the board bounds, traverse a foreign net's
- * edge, or pass through a hole occupied by a foreign pin or run.
+ * Routes underside wire runs on the {@link GridModel} lattice with A*. Steps are orthogonal
+ * ({@link #STEP_COST}) or 45° diagonal ({@link #DIAGONAL_COST} ≈ √2×), plus a turn penalty
+ * graded by turn angle (straight runs are easier to solder); runs may not leave the board
+ * bounds, traverse a foreign net's edge (including the crossing diagonal of the same grid
+ * square), or pass through a hole occupied by a foreign pin or run.
  *
  * @author Layout Compressor contributors
  */
 public class Router {
 
   public static final int STEP_COST = 10;
+  public static final int DIAGONAL_COST = 14;
   public static final int TURN_COST = 5;
 
-  private static final int[][] DIRECTIONS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+  private static final int[][] DIRECTIONS =
+      {{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+  /** Octant (45° sector index) of each direction, for angle-graded turn penalties. */
+  private static final int[] OCTANT = {0, 4, 2, 6, 1, 7, 3, 5};
+
+  /** Turn penalty by turn angle in 45° increments: straight, 45°, 90°, 135°, 180°. */
+  private static final int[] TURN_PENALTY = {0, 3, TURN_COST, 8, 10};
 
   private final GridModel grid;
   private final Rectangle bounds;
@@ -107,9 +116,9 @@ public class Router {
             || !holeOpen(netId, next, throughForeignWires)) {
           continue;
         }
-        int cost = current.cost + STEP_COST;
-        if (current.state.direction() != -1 && current.state.direction() != dir) {
-          cost += TURN_COST;
+        int cost = current.cost + (dir < 4 ? STEP_COST : DIAGONAL_COST);
+        if (current.state.direction() != -1) {
+          cost += TURN_PENALTY[angleSteps(current.state.direction(), dir)];
         }
         State nextState = new State(next, dir);
         if (cost < bestCost.getOrDefault(nextState, Integer.MAX_VALUE)) {
@@ -239,6 +248,10 @@ public class Router {
         if (edgeNet != null && edgeNet != netId) {
           blockers.add(edgeNet);
         }
+        Integer crossingNet = grid.wireCrossingNetAt(path.get(i - 1), path.get(i));
+        if (crossingNet != null && crossingNet != netId) {
+          blockers.add(crossingNet);
+        }
       }
     }
     return blockers;
@@ -362,6 +375,12 @@ public class Router {
     return Math.abs(a.col() - b.col()) + Math.abs(a.row() - b.row());
   }
 
+  /** Turn angle between two direction indices, in 45° increments (0..4). */
+  private static int angleSteps(int dir1, int dir2) {
+    int diff = Math.abs(OCTANT[dir1] - OCTANT[dir2]);
+    return Math.min(diff, 8 - diff);
+  }
+
   private boolean holeOpen(int netId, Cell cell, boolean throughForeignWires) {
     if (!throughForeignWires) {
       return grid.canPassHole(netId, cell);
@@ -378,16 +397,18 @@ public class Router {
         && cell.row() >= bounds.y && cell.row() <= bounds.y + bounds.height;
   }
 
-  /** Admissible: smallest manhattan distance to any target, in step costs. */
+  /** Admissible: smallest octile distance to any target, in step costs. */
   private static int heuristic(Cell cell, Set<Cell> targets) {
     int min = Integer.MAX_VALUE;
     for (Cell t : targets) {
-      int d = Math.abs(cell.col() - t.col()) + Math.abs(cell.row() - t.row());
+      int dc = Math.abs(cell.col() - t.col());
+      int dr = Math.abs(cell.row() - t.row());
+      int d = DIAGONAL_COST * Math.min(dc, dr) + STEP_COST * Math.abs(dc - dr);
       if (d < min) {
         min = d;
       }
     }
-    return min * STEP_COST;
+    return min;
   }
 
   private static List<Cell> reconstruct(Map<State, State> parent, State goal) {
