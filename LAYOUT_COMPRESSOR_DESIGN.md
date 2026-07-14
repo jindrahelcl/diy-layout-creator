@@ -129,9 +129,11 @@ factor (start 2.0). If legalization fails, grow the canvas and retry — never f
 
 ### 4.3 Router
 
-- Graph: hole lattice; edges between orthogonally adjacent holes (diagonals off in v1).
-- Edge cost: 1 per step + turn penalty (straighter runs are easier to solder) + light
-  congestion penalty near foreign pins.
+- Graph: hole lattice; edges between orthogonally adjacent holes plus 45° diagonals. The two
+  diagonals of one grid square physically cross mid-square, so claiming one blocks the other
+  for foreign nets.
+- Edge cost: 10 per orthogonal step, 14 per diagonal (≈ √2), plus a turn penalty graded by
+  angle (45° = 3, 90° = 5, 135° = 8, 180° = 10 — straighter runs are easier to solder).
 - Multi-terminal nets: sort terminals, route first pair with A*, then each remaining terminal
   to the nearest node of the existing tree (standard cheap Steiner approximation).
 - Underside run segments claim lattice edges *and* holes they pass through (a bare wire
