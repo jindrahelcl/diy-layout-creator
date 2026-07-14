@@ -289,7 +289,12 @@ public class Router {
     return blockers;
   }
 
-  /** Connects each failed pin with a top-side jumper to the nearest connected cell. */
+  /**
+   * Connects each failed pin with a top-side jumper to the nearest connected cell. A jumper
+   * end never sits in a pin hole (the component's lead already occupies it) or under a body,
+   * and a hole hosts at most one jumper end — such ends escape to the nearest eligible free
+   * hole, tied to the original cell by a short underside stub run (emitted as a trace).
+   */
   private void resolveFailedPins(RoutedNet net, List<Cell> pins) {
     if (net.getFailedPins().isEmpty()) {
       return;
@@ -299,12 +304,75 @@ public class Router {
       connected = new HashSet<Cell>(pins);
       connected.removeAll(net.getFailedPins());
     }
+    Set<Cell> usedJumperHoles = new HashSet<Cell>();
+    for (RoutedNet.Jumper jumper : net.getJumpers()) {
+      usedJumperHoles.add(jumper.from());
+      usedJumperHoles.add(jumper.to());
+    }
     for (Cell pin : new ArrayList<Cell>(net.getFailedPins())) {
       Cell target = nearestCell(pin, connected);
-      net.getJumpers().add(new RoutedNet.Jumper(pin, target));
+      Cell from = escapeHole(net, pin, target, usedJumperHoles, connected);
+      Cell to = escapeHole(net, target, from, usedJumperHoles, connected);
+      net.getJumpers().add(new RoutedNet.Jumper(from, to));
       connected.add(pin);
+      connected.add(from);
+      connected.add(to);
     }
     net.getFailedPins().clear();
+  }
+
+  /** How far a jumper end may move from the cell it connects, in Chebyshev cells. */
+  private static final int MAX_ESCAPE_RADIUS = 2;
+
+  /**
+   * A hole where a jumper end for this net may physically sit. If the cell itself is free
+   * (typically a tree cell of the net's own runs), it is used directly; otherwise the nearest
+   * eligible hole — no pin, no body, no foreign run, no other jumper end — is picked, biased
+   * toward the jumper's other end, and connected to the cell by a claimed underside stub run.
+   * Falls back to the cell itself when no stub can be routed.
+   */
+  private Cell escapeHole(RoutedNet net, Cell cell, Cell otherEnd, Set<Cell> usedJumperHoles,
+      Set<Cell> connected) {
+    int netId = net.getNetId();
+    boolean pinHole = grid.pinNetAt(cell) != null || !grid.pinsAt(cell).isEmpty();
+    if (!pinHole && grid.bodiesAt(cell).isEmpty() && !usedJumperHoles.contains(cell)) {
+      usedJumperHoles.add(cell);
+      return cell;
+    }
+
+    List<Cell> candidates = new ArrayList<Cell>();
+    for (int radius = 1; radius <= MAX_ESCAPE_RADIUS; radius++) {
+      for (int dr = -radius; dr <= radius; dr++) {
+        for (int dc = -radius; dc <= radius; dc++) {
+          if (Math.max(Math.abs(dr), Math.abs(dc)) != radius) {
+            continue;
+          }
+          Cell candidate = new Cell(cell.col() + dc, cell.row() + dr);
+          Integer wireNet = grid.wireHoleNetAt(candidate);
+          if (inBounds(candidate) && grid.pinNetAt(candidate) == null
+              && grid.pinsAt(candidate).isEmpty() && grid.bodiesAt(candidate).isEmpty()
+              && (wireNet == null || wireNet == netId)
+              && !usedJumperHoles.contains(candidate)) {
+            candidates.add(candidate);
+          }
+        }
+      }
+    }
+    candidates.sort(Comparator.comparingInt((Cell c) -> manhattan(c, otherEnd))
+        .thenComparing(OPEN_CELL_ORDER));
+
+    for (Cell candidate : candidates) {
+      List<Cell> stub = findPath(netId, cell, Set.of(candidate));
+      if (stub != null && stub.size() > 1) {
+        net.getRuns().add(stub);
+        grid.claimRun(netId, stub);
+        connected.addAll(stub);
+        usedJumperHoles.add(candidate);
+        return candidate;
+      }
+    }
+    usedJumperHoles.add(cell);
+    return cell;
   }
 
   private static Cell nearestCell(Cell from, Set<Cell> candidates) {

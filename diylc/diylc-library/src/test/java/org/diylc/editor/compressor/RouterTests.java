@@ -215,8 +215,34 @@ public class RouterTests {
     for (RoutedNet net : result.getNets()) {
       assertTrue(net.getFailedPins().isEmpty());
     }
-    // one net routed on the underside with minimal length, the other jumped
-    assertEquals(4, result.getTotalWireLength());
+    // one net routed on the underside with minimal length (4), the other jumped between free
+    // holes next to its pins, each tied to the pin by a one-cell stub run (+2)
+    assertEquals(6, result.getTotalWireLength());
+  }
+
+  @Test
+  public void jumperEndsEscapePinHolesViaStubRuns() {
+    GridModel grid = new GridModel();
+    Router router = new Router(grid, new Rectangle(0, 0, 4, 4));
+    List<List<Cell>> nets = List.of(
+        List.of(new Cell(0, 2), new Cell(4, 2)),
+        List.of(new Cell(2, 0), new Cell(2, 4)));
+
+    RoutingResult result = router.routeAll(nets);
+
+    for (RoutedNet net : result.getNets()) {
+      for (RoutedNet.Jumper jumper : net.getJumpers()) {
+        for (Cell end : List.of(jumper.from(), jumper.to())) {
+          // no jumper end sits in a pin hole; each end is tied in by a run of its net
+          assertNull("jumper end in a pin hole: " + end, grid.pinNetAt(end));
+          boolean tiedIn = false;
+          for (List<Cell> run : net.getRuns()) {
+            tiedIn |= run.get(0).equals(end) || run.get(run.size() - 1).equals(end);
+          }
+          assertTrue("jumper end not connected by a run: " + end, tiedIn);
+        }
+      }
+    }
   }
 
   @Test
