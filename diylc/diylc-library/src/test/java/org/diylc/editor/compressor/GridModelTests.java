@@ -54,6 +54,36 @@ public class GridModelTests {
   }
 
   @Test
+  public void padHaloBlocksForeignRunsButNotTheOwnNet() {
+    GridModel grid = new GridModel();
+    Resistor turretish = new Resistor();
+    grid.occupyPin(new Cell(5, 5), turretish, 0);
+    grid.setPinNet(new Cell(5, 5), 3);
+    // turret-sized pad (radius 16 px): one ring of neighbors is off limits to foreign runs
+    grid.claimPadHalo(new Cell(5, 5), turretish, 0, 16);
+
+    assertFalse(grid.canPassHole(1, new Cell(6, 5)));
+    assertFalse(grid.canPassHole(1, new Cell(4, 4)));
+    assertTrue("own net must reach its pin", grid.canPassHole(3, new Cell(6, 5)));
+    assertTrue("outside the halo", grid.canPassHole(1, new Cell(7, 5)));
+
+    grid.vacate(turretish);
+    assertTrue(grid.canPassHole(1, new Cell(6, 5)));
+  }
+
+  @Test
+  public void smallPadsClaimNoHalo() {
+    GridModel grid = new GridModel();
+    Resistor part = new Resistor();
+    grid.occupyPin(new Cell(5, 5), part, 0);
+    // solder-pad-sized (radius 9 px): clearance fits inside its own cell
+    grid.claimPadHalo(new Cell(5, 5), part, 0, 9);
+
+    assertTrue(grid.canPassHole(1, new Cell(6, 5)));
+    assertEquals(0, grid.haloCellsOf(part).size());
+  }
+
+  @Test
   public void convertsCellBackToPixels() {
     Point2D pixels = GridModel.toPixels(new Cell(39, 37));
     assertEquals(780d, pixels.getX(), 0.001);

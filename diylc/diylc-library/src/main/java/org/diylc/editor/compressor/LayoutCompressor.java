@@ -22,9 +22,11 @@
 package org.diylc.editor.compressor;
 
 import java.awt.Rectangle;
+import java.awt.geom.Area;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -75,6 +77,7 @@ public class LayoutCompressor implements IProjectEditor {
 
   private final List<ContinuityArea> continuityAreas;
   private final Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider;
+  private Function<IDIYComponent<?>, Collection<Area>> copperProvider;
   private int loopIterations = LOOP_ITERATIONS;
   private Stats stats;
 
@@ -82,6 +85,46 @@ public class LayoutCompressor implements IProjectEditor {
       Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider) {
     this.continuityAreas = continuityAreas;
     this.bodyBoundsProvider = bodyBoundsProvider;
+  }
+
+  /**
+   * Supplies each component's drawn copper areas (its continuity positive areas), used to size
+   * pad-clearance halos around pins — a bare run next to a turret or eyelet pad would touch
+   * it. Without a provider no halos are claimed.
+   */
+  public void setCopperProvider(Function<IDIYComponent<?>, Collection<Area>> copperProvider) {
+    this.copperProvider = copperProvider;
+  }
+
+  /**
+   * Copper pad radius around each sticky pin, from the pad areas drawn at the pin: half the
+   * smaller bounds dimension (robust for round pads and pad strips alike), capped at 1.5
+   * cells — anything bigger is not a pad but a plane, and those components aren't real parts.
+   */
+  private Map<Integer, Double> padRadii(IDIYComponent<?> component) {
+    if (copperProvider == null) {
+      return null;
+    }
+    Collection<Area> copper = copperProvider.apply(component);
+    if (copper == null || copper.isEmpty()) {
+      return null;
+    }
+    Map<Integer, Double> radii = new HashMap<Integer, Double>();
+    for (int i = 0; i < component.getControlPointCount(); i++) {
+      if (!component.isControlPointSticky(i)) {
+        continue;
+      }
+      Point2D pin = component.getControlPoint(i);
+      double radius = 0;
+      for (Area area : copper) {
+        Rectangle2D bounds = area.getBounds2D();
+        if (bounds.contains(pin)) {
+          radius = Math.max(radius, Math.min(bounds.getWidth(), bounds.getHeight()) / 2);
+        }
+      }
+      radii.put(i, Math.min(radius, GridModel.CELL_SIZE_PX * 1.5));
+    }
+    return radii;
   }
 
   @Override
@@ -128,7 +171,7 @@ public class LayoutCompressor implements IProjectEditor {
       IDIYComponent<?> clone = toScratch.get(original);
       Rectangle2D bodyBounds =
           bodyBoundsProvider == null ? null : bodyBoundsProvider.apply(original);
-      Footprint footprint = Footprint.of(clone, bodyBounds);
+      Footprint footprint = Footprint.of(clone, bodyBounds, padRadii(original));
       if (lockedOriginals.contains(original)) {
         fixed.add(footprint);
       } else {
@@ -156,6 +199,8 @@ public class LayoutCompressor implements IProjectEditor {
           Cell cell = GridModel
               .snap(footprint.getComponent().getControlPoint(pinIndex));
           grid.occupyPin(cell, footprint.getComponent(), pinIndex);
+          grid.claimPadHalo(cell, footprint.getComponent(), pinIndex,
+              footprint.getPadRadiusPx(i));
         }
       } else {
         remote.add(footprint.getComponent());

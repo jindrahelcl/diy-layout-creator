@@ -65,10 +65,21 @@ public class GridModel {
     }
   }
 
+  /** A cell kept clear of foreign runs because a fat pad ({@code pinCell}) reaches into it. */
+  public record HaloClaim(Pin pin, Cell pinCell) {
+  }
+
+  /**
+   * Half the emitted trace thickness plus safety margin, in px: copper this close to a foreign
+   * pad's edge counts as touching (DIYLC merges copper by area contact when re-scanned).
+   */
+  public static final double TRACE_CLEARANCE_PX = 6d;
+
   private final Map<Cell, List<Pin>> pins = new HashMap<Cell, List<Pin>>();
   private final Map<Cell, Set<IDIYComponent<?>>> bodies =
       new HashMap<Cell, Set<IDIYComponent<?>>>();
   private final Map<Cell, Integer> pinNets = new HashMap<Cell, Integer>();
+  private final Map<Cell, List<HaloClaim>> padHalos = new HashMap<Cell, List<HaloClaim>>();
   private final Map<Edge, Integer> wireEdges = new HashMap<Edge, Integer>();
   private final Map<Cell, Integer> wireHoles = new HashMap<Cell, Integer>();
 
@@ -97,6 +108,57 @@ public class GridModel {
   }
 
   /**
+   * Marks the holes around a fat-padded pin as off limits for foreign runs: a bare wire in a
+   * neighboring hole would touch the pad copper. Which rings get claimed follows from the pad
+   * radius; small pads (radius + {@link #TRACE_CLEARANCE_PX} within one cell) claim nothing.
+   * The pin's own net may still route through — it has to reach the pin.
+   */
+  public void claimPadHalo(Cell pinCell, IDIYComponent<?> component, int pointIndex,
+      double padRadiusPx) {
+    int rings = haloRings(padRadiusPx);
+    HaloClaim claim = new HaloClaim(new Pin(component, pointIndex), pinCell);
+    for (int dr = -rings; dr <= rings; dr++) {
+      for (int dc = -rings; dc <= rings; dc++) {
+        if (dr == 0 && dc == 0) {
+          continue;
+        }
+        Cell cell = new Cell(pinCell.col() + dc, pinCell.row() + dr);
+        padHalos.computeIfAbsent(cell, (c) -> new ArrayList<HaloClaim>()).add(claim);
+      }
+    }
+  }
+
+  /**
+   * Rings of neighboring holes a pad keeps clear. Blocking a ring also blocks every lattice
+   * edge that passes closer than the next ring's holes, so one ring protects clearances up to
+   * ~1.4 cells (the diagonal passage), two up to ~2.8.
+   */
+  static int haloRings(double padRadiusPx) {
+    double clearance = padRadiusPx + TRACE_CLEARANCE_PX;
+    if (clearance <= CELL_SIZE_PX) {
+      return 0;
+    }
+    if (clearance <= CELL_SIZE_PX * Math.sqrt(2)) {
+      return 1;
+    }
+    return 2;
+  }
+
+  /** Cells the component's pad halos claim (empty for components without fat pads). */
+  public List<Cell> haloCellsOf(IDIYComponent<?> component) {
+    List<Cell> cells = new ArrayList<Cell>();
+    for (Map.Entry<Cell, List<HaloClaim>> entry : padHalos.entrySet()) {
+      for (HaloClaim claim : entry.getValue()) {
+        if (claim.pin().component() == component) {
+          cells.add(entry.getKey());
+          break;
+        }
+      }
+    }
+    return cells;
+  }
+
+  /**
    * Removes every pin and body claim of the component, so it can be re-placed elsewhere. A
    * cell's pin-net assignment is dropped once no pins remain there. Wire claims are untouched —
    * release the affected nets separately.
@@ -112,6 +174,10 @@ public class GridModel {
     });
     bodies.entrySet().removeIf((entry) -> {
       entry.getValue().remove(component);
+      return entry.getValue().isEmpty();
+    });
+    padHalos.entrySet().removeIf((entry) -> {
+      entry.getValue().removeIf((claim) -> claim.pin().component() == component);
       return entry.getValue().isEmpty();
     });
   }
@@ -165,7 +231,8 @@ public class GridModel {
 
   /**
    * True if an underside run of the given net may pass through this hole: bare wire shorts
-   * against pins and runs of other nets (and pins with no net assigned).
+   * against pins and runs of other nets (and pins with no net assigned), and against the pad
+   * copper of a fat pin reaching into the hole from next door.
    */
   public boolean canPassHole(int netId, Cell cell) {
     Integer pinNet = pinNets.get(cell);
@@ -175,6 +242,15 @@ public class GridModel {
       }
     } else if (!pinsAt(cell).isEmpty()) {
       return false;
+    }
+    List<HaloClaim> halos = padHalos.get(cell);
+    if (halos != null) {
+      for (HaloClaim claim : halos) {
+        Integer haloNet = pinNets.get(claim.pinCell());
+        if (haloNet == null || haloNet != netId) {
+          return false;
+        }
+      }
     }
     Integer wireNet = wireHoles.get(cell);
     return wireNet == null || wireNet == netId;

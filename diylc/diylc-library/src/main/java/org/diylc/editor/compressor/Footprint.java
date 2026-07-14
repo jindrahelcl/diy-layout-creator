@@ -27,6 +27,7 @@ import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import org.diylc.common.ComponentType;
 import org.diylc.components.AbstractLeadedComponent;
@@ -64,10 +65,12 @@ public class Footprint {
   private final double bodyLengthCells;
   private final double bodyWidthCells;
   private final int naturalSpanCells;
+  private final double[] padRadiiPx;
 
   private Footprint(IDIYComponent<?> component, List<Integer> pinIndices, List<Cell> pinOffsets,
       boolean onGrid, boolean stretchable, boolean rotatable, Rectangle bodyCells,
-      double bodyLengthCells, double bodyWidthCells, int naturalSpanCells) {
+      double bodyLengthCells, double bodyWidthCells, int naturalSpanCells,
+      double[] padRadiiPx) {
     this.component = component;
     this.pinIndices = pinIndices;
     this.pinOffsets = pinOffsets;
@@ -78,13 +81,23 @@ public class Footprint {
     this.bodyLengthCells = bodyLengthCells;
     this.bodyWidthCells = bodyWidthCells;
     this.naturalSpanCells = naturalSpanCells;
+    this.padRadiiPx = padRadiiPx;
   }
 
   public static Footprint of(IDIYComponent<?> component) {
-    return of(component, null);
+    return of(component, null, null);
   }
 
   public static Footprint of(IDIYComponent<?> component, Rectangle2D bodyBoundsPx) {
+    return of(component, bodyBoundsPx, null);
+  }
+
+  /**
+   * @param padRadiiPx copper pad radius around each control point (by control point index), or
+   *        null when unknown — fat pads keep foreign runs out of neighboring holes
+   */
+  public static Footprint of(IDIYComponent<?> component, Rectangle2D bodyBoundsPx,
+      Map<Integer, Double> padRadiiPx) {
     List<Integer> pinIndices = new ArrayList<Integer>();
     List<Point2D> pinPoints = new ArrayList<Point2D>();
     for (int i = 0; i < component.getControlPointCount(); i++) {
@@ -148,9 +161,17 @@ public class Footprint {
 
     boolean rotatable = stretchable || hasRotationTransformer(component);
 
+    double[] pinPadRadii = new double[pinIndices.size()];
+    if (padRadiiPx != null) {
+      for (int i = 0; i < pinIndices.size(); i++) {
+        Double radius = padRadiiPx.get(pinIndices.get(i));
+        pinPadRadii[i] = radius == null ? 0 : radius;
+      }
+    }
+
     return new Footprint(component, Collections.unmodifiableList(pinIndices),
         Collections.unmodifiableList(pinOffsets), onGrid, stretchable, rotatable, bodyCells,
-        bodyLengthCells, bodyWidthCells, naturalSpanCells);
+        bodyLengthCells, bodyWidthCells, naturalSpanCells, pinPadRadii);
   }
 
   private static Rectangle2D bodyShapeBounds(IDIYComponent<?> component) {
@@ -305,5 +326,14 @@ public class Footprint {
    */
   public int getNaturalSpanCells() {
     return naturalSpanCells;
+  }
+
+  /**
+   * Copper pad radius around the pin at the given position (parallel to
+   * {@link #getPinIndices()}), in px; 0 when unknown. Fat pads (turrets, eyelets) keep foreign
+   * runs out of neighboring holes via {@link GridModel#claimPadHalo}.
+   */
+  public double getPadRadiusPx(int position) {
+    return padRadiiPx[position];
   }
 }

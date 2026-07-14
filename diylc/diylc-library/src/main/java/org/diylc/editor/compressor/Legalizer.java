@@ -136,12 +136,14 @@ public class Legalizer {
     return true;
   }
 
-  /** Claims the placement's pin and body cells in the grid. */
+  /** Claims the placement's pin and body cells in the grid, plus fat pads' clearance halos. */
   public static void occupy(Placement placed, GridModel grid) {
     List<Cell> pinCells = placed.pinCells();
     List<Integer> pinIndices = placed.footprint().getPinIndices();
     for (int i = 0; i < pinCells.size(); i++) {
       grid.occupyPin(pinCells.get(i), placed.footprint().getComponent(), pinIndices.get(i));
+      grid.claimPadHalo(pinCells.get(i), placed.footprint().getComponent(), pinIndices.get(i),
+          placed.footprint().getPadRadiusPx(i));
     }
     for (Rectangle body : placed.bodyCells()) {
       for (int col = body.x; col <= body.x + body.width; col++) {

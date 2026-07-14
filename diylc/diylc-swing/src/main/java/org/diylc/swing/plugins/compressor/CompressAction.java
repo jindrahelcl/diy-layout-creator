@@ -67,6 +67,10 @@ public class CompressAction extends AbstractAction {
       return area == null || area.getOutlineArea() == null ? null
           : area.getOutlineArea().getBounds2D();
     });
+    compressor.setCopperProvider((c) -> {
+      ComponentArea area = drawingManager.getComponentArea(c);
+      return area == null ? null : area.getContinuityPositiveAreas();
+    });
 
     plugInPort.applyEditor(compressor);
 

@@ -82,6 +82,23 @@ public class RouterTests {
   }
 
   @Test
+  public void detoursAroundFatPadHalo() {
+    GridModel grid = new GridModel();
+    Resistor turretish = new Resistor();
+    grid.occupyPin(new Cell(3, 5), turretish, 0);
+    grid.claimPadHalo(new Cell(3, 5), turretish, 0, 16);
+    Router router = new Router(grid, BOUNDS);
+
+    List<Cell> path = router.findPath(0, new Cell(1, 5), Set.of(new Cell(6, 5)));
+
+    assertNotNull(path);
+    for (Cell c : path) {
+      assertTrue("path enters the pad halo at " + c,
+          Math.max(Math.abs(c.col() - 3), Math.abs(c.row() - 5)) > 1);
+    }
+  }
+
+  @Test
   public void returnsNullWhenWalledOff() {
     GridModel grid = new GridModel();
     // net 1 spans the full board height at col 3: no way around within bounds

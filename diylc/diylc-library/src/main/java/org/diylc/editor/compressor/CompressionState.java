@@ -203,6 +203,13 @@ public class CompressionState {
         affected.add(displaced);
       }
     }
+    // foreign runs that now pass through the moved part's pad halos must clear out too
+    for (Cell cell : grid.haloCellsOf(component)) {
+      Integer displaced = grid.wireHoleNetAt(cell);
+      if (displaced != null) {
+        affected.add(displaced);
+      }
+    }
     rerouteNets(affected);
     undo = pending;
     return cost();
