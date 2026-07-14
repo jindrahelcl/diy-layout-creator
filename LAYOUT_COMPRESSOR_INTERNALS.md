@@ -174,8 +174,16 @@ Built by `Footprint.of(component, bodyBoundsPx)`:
   (pins still block) to find the blocking nets; if ≤ `MAX_RIP_UP = 3`, snapshot wires, release
   the blockers, route this pin, re-route the blockers, and keep the outcome only if the
   blockers' jumper count didn't increase — otherwise restore the snapshot. Anything still
-  failed becomes a top jumper to the nearest connected cell (`resolveFailedPins`) — **routing
-  never fails**, it degrades into jumper cost.
+  failed becomes a top jumper (`resolveFailedPins`) — **routing never fails**, it degrades
+  into jumper cost.
+- **Jumper endpoints** (`resolveFailedPins` + `escapeHole`): a jumper end never sits in a pin
+  hole (the component's lead occupies it) or under a body, and a hole hosts at most one jumper
+  end. Pin-side ends *escape* to the nearest eligible free hole within
+  `MAX_ESCAPE_RADIUS = 2` (biased toward the jumper's other end), tied to the pin by a claimed
+  underside stub run — the emitter renders the stub as a normal CopperTrace and connectivity
+  follows from the endpoint-breaking rule. Falls back to the pin cell itself only when no stub
+  routes. The jumper *target* is chosen by `bestJumperTarget`: manhattan distance plus
+  `CROSSING_BIAS = 8` per existing jumper the new wire would cross.
 - **`rerouteNets(result, netPins, netIds)`**: incremental variant — releases and re-tags only
   the subset, but its rip-up may touch nets *outside* the subset; callers that need undo take a
   full wire snapshot (that's exactly what `CompressionState` does). The result's nets list is
@@ -198,8 +206,10 @@ fully routed** between moves.
 - `undoMove()`: **single-level** undo of the last successful try — restores the moved placement
   (if any), the full wire snapshot, and a shallow copy of the nets list. One undo slot only;
   every `try*` overwrites it.
-- `cost()` = `10·(bounds.width+1 + bounds.height+1) + 50·jumpers + 1·wireLength`
-  (`AREA_WEIGHT`, `JUMPER_WEIGHT`, `LENGTH_WEIGHT`).
+- `cost()` = `10·(bounds.width+1 + bounds.height+1) + 50·jumpers + 15·jumperCrossings +
+  1·wireLength` (`AREA_WEIGHT`, `JUMPER_WEIGHT`, `CROSSING_WEIGHT`, `LENGTH_WEIGHT`).
+  Crossings = pairs of jumper wires that touch or cross anywhere except a shared endpoint
+  (`RoutingResult.getJumperCrossings` / `segmentsCross`).
 
 `CompressionLoop.run(iterations, timeBudgetMs)`: seeded `Random`; per iteration one move —
 SLIDE ±1 cell (4⁄8 odds, the workhorse), ROTATE (random other orientation), STRETCH span ±1,
@@ -287,13 +297,16 @@ Oscllator_v1* (92 nets, the stress test).
 
 ## Current state and where work continues
 
-Done: M0–M3 (survey, world model, router, end-to-end normalization + UI) and M4a (greedy loop)
-plus the radial body-overlap fix. Open, in agreed order: **#17** natural lead spans (normalize
-spans to body-derived natural length at seeding, add a span-deviation cost term so STRETCH
-fine-tunes; optional standing-mount mode), **#18** net-merging emission bug (pre-existing M3
-emission defect — suspects: emitted copper touching foreign pads by area overlap in the
-continuity scan, turret node naming, traces grazing pads on dense boards), then **M4b**
-annealer (geometric cooling, ~5 s wall-clock budget, cancel hook, global-best tracking) + 4.6
-corpus validation. Git: branch `layout-compressor`; the fork is `origin` on the home Windows
+Done: M0–M3 (survey, world model, router, end-to-end normalization + UI), M4a (greedy loop),
+the radial body-overlap fix, jumper endpoint escaping (free holes + stub traces), and the
+jumper-crossing penalty. Open, in agreed order: **#17** natural lead spans (normalize spans to
+body-derived natural length at seeding, add a span-deviation cost term so STRETCH fine-tunes;
+optional standing-mount mode), **#18** net-merging emission bug (pre-existing M3 emission
+defect — suspects: emitted copper touching foreign pads by area overlap in the continuity
+scan, turret node naming, traces grazing pads on dense boards), then **M4b** annealer
+(geometric cooling, ~5 s wall-clock budget, cancel hook, global-best tracking) + 4.6 corpus
+validation, and later initial-placement quality (**#19**: edge terminals, bypass caps near
+power pins — deep jumper-tangle reduction on dense boards depends on this and on M4b's real
+loop budget). Git: branch `layout-compressor`; the fork is `origin` on the home Windows
 machine and `fork` on the office Linux machine — **never push to bancika's repo** (named
 `upstream` at home). Commit per substep, brief messages (subject + Co-Authored-By only).
