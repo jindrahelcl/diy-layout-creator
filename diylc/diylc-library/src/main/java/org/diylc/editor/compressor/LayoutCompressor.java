@@ -28,7 +28,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,6 +37,7 @@ import org.diylc.common.IProjectEditor;
 import org.diylc.core.IDIYComponent;
 import org.diylc.core.Project;
 import org.diylc.editor.compressor.ComponentClassifier.Classification;
+import org.diylc.editor.compressor.CompressionState.PinRef;
 import org.diylc.editor.compressor.GridModel.Cell;
 import org.diylc.editor.compressor.PlacementSeeder.Placement;
 import org.diylc.editor.compressor.PlacementSeeder.Seed;
@@ -59,6 +59,12 @@ public class LayoutCompressor implements IProjectEditor {
   /** Extra routing room around the occupied area, in cells. */
   public static final int ROUTING_MARGIN_CELLS = 2;
 
+  /** Random moves the improvement loop attempts (greedy descent for now). */
+  public static final int LOOP_ITERATIONS = 2000;
+
+  /** Fixed loop seed: same input, same output — easier to reason about results. */
+  public static final long LOOP_SEED = 42;
+
   /** Outcome stats for the result dialog. */
   public record Stats(Rectangle boardCells, int netCount, int wireLength, int jumperCount,
       int movedParts, int remoteParts, int flyingWires) {
@@ -66,6 +72,7 @@ public class LayoutCompressor implements IProjectEditor {
 
   private final List<ContinuityArea> continuityAreas;
   private final Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider;
+  private int loopIterations = LOOP_ITERATIONS;
   private Stats stats;
 
   public LayoutCompressor(List<ContinuityArea> continuityAreas,
@@ -82,6 +89,11 @@ public class LayoutCompressor implements IProjectEditor {
   /** Stats of the last successful {@link #edit}, for reporting. */
   public Stats getStats() {
     return stats;
+  }
+
+  /** Overrides the improvement loop's move budget; 0 disables the loop. */
+  public void setLoopIterations(int loopIterations) {
+    this.loopIterations = loopIterations;
   }
 
   @Override
@@ -149,49 +161,47 @@ public class LayoutCompressor implements IProjectEditor {
 
     Legalizer.Result legalized = new Legalizer().legalize(seed.placements(), grid);
 
-    // where every board pin ended up, keyed by scratch component and control point index
-    Map<IDIYComponent<?>, Map<Integer, Cell>> cellOf =
+    // pin cells of the immovable on-board parts, keyed by component and control point index
+    Map<IDIYComponent<?>, Map<Integer, Cell>> fixedPinCells =
         new IdentityHashMap<IDIYComponent<?>, Map<Integer, Cell>>();
-    for (Placement placement : legalized.placements()) {
-      Map<Integer, Cell> pinMap = new HashMap<Integer, Cell>();
-      List<Cell> pinCells = placement.pinCells();
-      for (int i = 0; i < pinCells.size(); i++) {
-        pinMap.put(placement.footprint().getPinIndices().get(i), pinCells.get(i));
-      }
-      cellOf.put(placement.footprint().getComponent(), pinMap);
-    }
     for (Footprint footprint : fixedOnBoard.values()) {
       Map<Integer, Cell> pinMap = new HashMap<Integer, Cell>();
       for (int pinIndex : footprint.getPinIndices()) {
         pinMap.put(pinIndex, GridModel.snap(footprint.getComponent().getControlPoint(pinIndex)));
       }
-      cellOf.put(footprint.getComponent(), pinMap);
+      fixedPinCells.put(footprint.getComponent(), pinMap);
     }
 
-    // board-side routing terminals per net; remote pins are connected by flying wires later
-    List<List<Cell>> netCells = new ArrayList<List<Cell>>();
+    // nets as pin references on the scratch clones; remote pins resolve to no board cell and
+    // get flying wires below
+    List<List<PinRef>> netPins = new ArrayList<List<PinRef>>();
     for (Group net : nets) {
-      Set<Cell> cells = new LinkedHashSet<Cell>();
+      List<PinRef> pins = new ArrayList<PinRef>();
       for (Node node : net.getSortedNodes()) {
-        IDIYComponent<?> clone = toScratch.get(node.getComponent());
-        Map<Integer, Cell> pinMap = cellOf.get(clone);
-        if (pinMap != null && pinMap.containsKey(node.getPointIndex())) {
-          cells.add(pinMap.get(node.getPointIndex()));
-        }
+        pins.add(new PinRef(toScratch.get(node.getComponent()), node.getPointIndex()));
       }
-      netCells.add(new ArrayList<Cell>(cells));
+      netPins.add(pins);
     }
 
-    Rectangle bounds = grid.occupiedBounds();
-    bounds.grow(ROUTING_MARGIN_CELLS, ROUTING_MARGIN_CELLS);
-    RoutingResult routing = new Router(grid, bounds).routeAll(netCells);
+    // route the legalized placement, then let the improvement loop compact it
+    CompressionState state = new CompressionState(grid, legalized.placements(), fixedPinCells,
+        netPins, ROUTING_MARGIN_CELLS);
+    state.rerouteAll();
+    new CompressionLoop(state, LOOP_SEED).run(loopIterations);
+
+    List<Placement> placements = state.getPlacements();
+    RoutingResult routing = state.getRouting();
+    List<List<Cell>> netCells = state.netCells();
 
     Set<Cell> allPinCells = new HashSet<Cell>();
-    for (Map<Integer, Cell> pinMap : cellOf.values()) {
+    for (Placement placement : placements) {
+      allPinCells.addAll(placement.pinCells());
+    }
+    for (Map<Integer, Cell> pinMap : fixedPinCells.values()) {
       allPinCells.addAll(pinMap.values());
     }
     LayoutEmitter emitter = new LayoutEmitter();
-    LayoutEmitter.Emission emission = emitter.emit(scratch, legalized.placements(), routing,
+    LayoutEmitter.Emission emission = emitter.emit(scratch, placements, routing,
         grid.occupiedBounds(), allPinCells);
 
     // hook up remote (off-grid / locked off-grid) pins with flying wires: each pin to the
@@ -244,7 +254,7 @@ public class LayoutCompressor implements IProjectEditor {
     project.getGroupsEx().addAll(scratch.getGroupsEx());
 
     stats = new Stats(emission.board() == null ? null : grid.occupiedBounds(), nets.size(),
-        routing.getTotalWireLength(), routing.getJumperCount(), legalized.placements().size(),
+        routing.getTotalWireLength(), routing.getJumperCount(), placements.size(),
         remote.size(), flyingWires);
     return emitted;
   }
