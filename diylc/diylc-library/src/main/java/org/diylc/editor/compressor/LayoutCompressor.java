@@ -312,7 +312,11 @@ public class LayoutCompressor implements IProjectEditor {
     loop.setCancelMonitor(() -> cancelMonitor.getAsBoolean() || abortMonitor.getAsBoolean());
     loop.setProgressListener(
         (fraction) -> progressListener.accept("Compacting", 0.15 + 0.75 * fraction));
-    loop.run(loopIterations, LOOP_TIME_BUDGET_MS);
+    if (loopIterations > 0) {
+      loop.run(loopIterations, LOOP_TIME_BUDGET_MS);
+      // deterministic final squeeze: cost never increases, so this only ever helps
+      loop.compact();
+    }
 
     phase("Emitting the layout", 0.90);
     List<Placement> placements = state.getPlacements();

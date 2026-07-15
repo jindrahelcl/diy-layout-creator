@@ -21,11 +21,16 @@
 */
 package org.diylc.editor.compressor;
 
+import java.awt.Rectangle;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
+
+import org.diylc.core.IDIYComponent;
 
 import org.diylc.editor.compressor.GridModel.Cell;
 import org.diylc.editor.compressor.PlacementSeeder.Placement;
@@ -37,6 +42,9 @@ import org.diylc.editor.compressor.PlacementSeeder.Placement;
  * schedule driven by iteration progress, so a seed and iteration count give a deterministic
  * result. The global best state is tracked and restored at the end — the loop is
  * anytime-stoppable via the wall-clock budget or the cancel monitor without losing progress.
+ * {@link #compact()} is the deterministic complement: a greedy squeeze of boundary parts
+ * toward the center, run before annealing (tighter start) and after (random slides rarely
+ * finish off boundary outliers).
  *
  * @author Layout Compressor contributors
  */
@@ -48,10 +56,17 @@ public class CompressionLoop {
   /** Temperature at the end of the schedule; effectively greedy. */
   public static final double END_TEMPERATURE = 0.5;
 
+  /** Farthest inward jump attempted when pulling a boundary part toward the center. */
+  public static final int MAX_PULL_CELLS = 8;
+
   private static final int[][] SLIDE_DELTAS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
   /** How many iterations between progress reports. */
   private static final int PROGRESS_STRIDE = 25;
+
+  /** Sweep caps for {@link #compact()}. */
+  private static final int MAX_COMPACT_SWEEPS = 30;
+  private static final int STALL_LIMIT = 3;
 
   private final CompressionState state;
   private final Random random;
@@ -122,6 +137,176 @@ public class CompressionLoop {
       state.restore(bestSnapshot);
     }
     return best;
+  }
+
+  /**
+   * Deterministic greedy squeeze, two kinds of moves per sweep: single parts touching an edge
+   * of the occupied bounding box are pulled toward the center (jumps of up to
+   * {@value #MAX_PULL_CELLS} cells, so a part can hop over occupied spots; kept when the cost
+   * does not worsen), and whole boundary rows/columns are peeled — all their parts moved
+   * inward as one atomic step, kept only when the total cost drops. The peel is what shrinks
+   * a board whose edge is shared by several parts, where any single pull just lengthens
+   * wires. Sweeps until nothing improved for {@value #STALL_LIMIT} sweeps. The cost never
+   * increases, and stopping via the cancel monitor keeps the progress made so far.
+   */
+  public long compact() {
+    long current = state.cost();
+    int stalls = 0;
+    for (int sweep = 0; sweep < MAX_COMPACT_SWEEPS && stalls < STALL_LIMIT; sweep++) {
+      boolean improved = false;
+      for (Placement placement : state.getPlacements()) {
+        if (cancelled.getAsBoolean()) {
+          return current;
+        }
+        IDIYComponent<?> component = placement.footprint().getComponent();
+        for (boolean horizontal : new boolean[] {true, false}) {
+          Long pulled = pullInward(component, horizontal);
+          if (pulled != null) {
+            improved |= pulled < current;
+            current = pulled;
+          }
+        }
+      }
+      for (int side = 0; side < 4; side++) {
+        if (cancelled.getAsBoolean()) {
+          return current;
+        }
+        Long peeled = peelEdge(side, current);
+        if (peeled != null) {
+          improved = true;
+          current = peeled;
+        }
+      }
+      stalls = improved ? 0 : stalls + 1;
+    }
+    return current;
+  }
+
+  /**
+   * Atomically moves every part touching one side of the occupied bounding box (0 = left,
+   * 1 = right, 2 = top, 3 = bottom) one step inward — each part to its nearest fitting cell —
+   * then re-routes any nets whose wires still hold the vacated line. Returns the new cost when
+   * it is strictly better; otherwise the snapshot is restored and null returned.
+   */
+  private Long peelEdge(int side, long current) {
+    Rectangle bounds = state.getGrid().occupiedBounds();
+    if (bounds == null || (side < 2 ? bounds.width : bounds.height) < 2) {
+      return null;
+    }
+    boolean horizontal = side < 2;
+    boolean minSide = side == 0 || side == 2;
+    int line = horizontal ? (minSide ? bounds.x : bounds.x + bounds.width)
+        : (minSide ? bounds.y : bounds.y + bounds.height);
+    int direction = minSide ? 1 : -1;
+
+    List<IDIYComponent<?>> movers = new ArrayList<IDIYComponent<?>>();
+    for (Placement placement : state.getPlacements()) {
+      Rectangle extent = extentOf(placement);
+      if (extent != null
+          && (horizontal ? extent.x <= line && line <= extent.x + extent.width
+              : extent.y <= line && line <= extent.y + extent.height)) {
+        movers.add(placement.footprint().getComponent());
+      }
+    }
+    if (movers.isEmpty()) {
+      return null;
+    }
+    CompressionState.Snapshot before = state.snapshot();
+    for (IDIYComponent<?> component : movers) {
+      Placement placement = state.placementOf(component);
+      boolean moved = false;
+      for (int d = 1; d <= MAX_PULL_CELLS && !moved; d++) {
+        Cell reference = new Cell(
+            placement.reference().col() + (horizontal ? direction * d : 0),
+            placement.reference().row() + (horizontal ? 0 : direction * d));
+        moved = state.tryPlacement(new Placement(placement.footprint(), reference,
+            placement.quarterTurns(), placement.span())) != null;
+      }
+      if (!moved) {
+        state.restore(before);
+        return null;
+      }
+    }
+    Set<Integer> lineNets = new HashSet<Integer>();
+    for (int i = 0; i <= (horizontal ? bounds.height : bounds.width); i++) {
+      Cell cell = horizontal ? new Cell(line, bounds.y + i) : new Cell(bounds.x + i, line);
+      Integer netId = state.getGrid().wireHoleNetAt(cell);
+      if (netId != null) {
+        lineNets.add(netId);
+      }
+    }
+    if (!lineNets.isEmpty()) {
+      state.rerouteNets(lineNets);
+    }
+    long cost = state.cost();
+    if (cost < current) {
+      return cost;
+    }
+    state.restore(before);
+    return null;
+  }
+
+  /**
+   * One inward pull attempt along one axis; null when the part is not on that axis's boundary
+   * or no acceptable spot was found (the state is then unchanged).
+   */
+  private Long pullInward(IDIYComponent<?> component, boolean horizontal) {
+    Placement placement = state.placementOf(component);
+    Rectangle bounds = state.getGrid().occupiedBounds();
+    Rectangle extent = extentOf(placement);
+    if (bounds == null || extent == null) {
+      return null;
+    }
+    int near = horizontal ? extent.x : extent.y;
+    int far = horizontal ? extent.x + extent.width : extent.y + extent.height;
+    int boundsNear = horizontal ? bounds.x : bounds.y;
+    int boundsFar = horizontal ? bounds.x + bounds.width : bounds.y + bounds.height;
+    boolean onNearEdge = near <= boundsNear;
+    boolean onFarEdge = far >= boundsFar;
+    if (onNearEdge == onFarEdge) {
+      // interior on this axis, or spanning it entirely — nothing to pull
+      return null;
+    }
+    int direction = onNearEdge ? 1 : -1;
+    int center = (boundsNear + boundsFar) / 2;
+    int maxPull = Math.min(MAX_PULL_CELLS, Math.abs(center - (onNearEdge ? near : far)));
+    long current = state.cost();
+    for (int d = 1; d <= maxPull; d++) {
+      Cell reference = new Cell(
+          placement.reference().col() + (horizontal ? direction * d : 0),
+          placement.reference().row() + (horizontal ? 0 : direction * d));
+      Long candidate = state.tryPlacement(new Placement(placement.footprint(), reference,
+          placement.quarterTurns(), placement.span()));
+      if (candidate == null) {
+        continue;
+      }
+      if (candidate <= current) {
+        return candidate;
+      }
+      state.undoMove();
+    }
+    return null;
+  }
+
+  /** Inclusive cell bounding box of the placement's pins and body. */
+  private static Rectangle extentOf(Placement placement) {
+    Rectangle extent = null;
+    for (Cell cell : placement.pinCells()) {
+      Rectangle cellRect = new Rectangle(cell.col(), cell.row(), 0, 0);
+      if (extent == null) {
+        extent = cellRect;
+      } else {
+        extent.add(cellRect);
+      }
+    }
+    for (Rectangle body : placement.bodyCells()) {
+      if (extent == null) {
+        extent = new Rectangle(body);
+      } else {
+        extent.add(body);
+      }
+    }
+    return extent;
   }
 
   /** One random move attempt; null when it was infeasible (the state is then unchanged). */

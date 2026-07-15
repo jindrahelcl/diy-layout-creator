@@ -32,7 +32,7 @@ Engine (all logic, no UI) — `diylc/diylc-library/src/main/java/org/diylc/edito
 | `Router` | 8-direction A* per net, multi-terminal trees, jumper fallback, rip-up ≤ 3 nets. |
 | `RoutedNet`, `RoutingResult` | Result containers: per-net runs, jumpers, failed pins; totals. |
 | `CompressionState` | The loop's world: placements + nets + routing, try/undo moves, cost. |
-| `CompressionLoop` | Seeded random improvement loop (greedy descent; annealer comes in M4b). |
+| `CompressionLoop` | Seeded simulated-annealing loop (`run`) plus a deterministic greedy squeeze (`compact`). |
 | `LayoutEmitter` | Writes placements back to components; emits traces/jumpers/PerfBoard. |
 | `ContinuityScanner` | Headless draw pass to recompute continuity areas for verification. |
 | `CompressionSurvey` | M0/M1 stats for the preview dialog; not part of the compress pipeline. |
@@ -231,6 +231,28 @@ progress (deterministic per seed; wall clock only stops early). The global best 
 restored at the end, so timeout/cancel (`setCancelMonitor`) never lose progress. Defaults in
 `LayoutCompressor`: 2000 iterations, 5 s budget, seed 42. SWAP move still deferred.
 
+`CompressionLoop.compact()` — **deterministic greedy squeeze**, run once after `run()` in
+`LayoutCompressor` (cost never increases, so it's a pure bonus pass). Fixes what annealing
+alone tends to leave behind: a part sitting on the board's edge whose lone SLIDE move doesn't
+pay for itself because a *neighbor* on the same edge is still holding the bounding box open —
+the single-move cost is a tie or a loss, so the annealer never takes it, and the board reads
+as if only some components moved in. Two move kinds per sweep, over all four edges of
+`occupiedBounds()`:
+  - **Pull** (`pullInward`): one part whose pins/body touch an edge hops up to
+    `MAX_PULL_CELLS = 8` cells toward the center (skipping occupied spots in between); kept
+    when the resulting cost doesn't worsen.
+  - **Peel** (`peelEdge`): *every* part touching one edge moves inward **as one atomic step**
+    — each mover just needs to fit (no per-mover cost check), nets on the vacated line are
+    re-routed, and the whole edge's move is kept only if the **total** cost strictly drops,
+    else the pre-peel snapshot is restored. This is what actually shrinks an edge shared by
+    several parts — individually each one's move might be cost-neutral or worse, but clearing
+    the whole line at once pays off.
+  Sweeps (parts, then all 4 edges) repeat until a sweep makes no strict improvement 3 times
+  running (`STALL_LIMIT`) or `MAX_COMPACT_SWEEPS = 30` is hit; the cancel monitor is checked
+  between moves so "Finish Now" still returns the best state found. Corpus check (vs. loop-only
+  baseline): aaa 21×25→20×25, LM386 23×25→20×25, Rix Pro Jr 60×34→60×33, Synth Oscillator
+  jumpers 79→72 (board unchanged) — all still pass the verification gate.
+
 ## LayoutEmitter
 
 - **Moving parts**: stretchable → set both lead points directly. Fixed → rotate via the
@@ -323,7 +345,10 @@ rescan; radii come from `setCopperProvider`, the drawn continuity-positive areas
 jumper ends re-escape on moves, and the annealer. Corpus (vs loop-off baseline): aaa 28×13/1
 jumper → 20×11/0; LM386 8 jumpers → 1; Rix Pro Jr **passes the gate** now, 12 jumpers → 3;
 Synth flat at 5 s (needs placement work). M5 progress/cancel UX is done (prepare/edit split,
-background task + `CompressProgressDialog`, wire z-order fix). Next: rest of **M5** (options —
+background task + `CompressProgressDialog`, wire z-order fix). Also done: `CompressionLoop.compact()`,
+a deterministic post-annealing squeeze pass (pull + atomic edge-peel) that closes the gap
+annealing alone leaves on boards where several parts share an edge — corpus: aaa 21×25→20×25,
+LM386 23×25→20×25, Rix Pro Jr 60×34→60×33, Synth jumpers 79→72. Next: rest of **M5** (options —
 time budget, wire colors, margin; §4.5 hardening; corpus-wide graceful degradation), **#19**
 initial placement quality (edge terminals, bypass caps near power pins), optional
 standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`; the fork is `origin` on the home Windows

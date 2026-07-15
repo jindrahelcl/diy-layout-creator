@@ -100,6 +100,38 @@ public class CompressionLoopTests {
   }
 
   @Test
+  public void compactPullsBoundaryPartsTogether() {
+    Resistor a = resistorAt(100, 100);
+    Resistor b = resistorAt(100, 900);
+    CompressionState state = sprawlingState(a, b);
+    long initial = state.cost();
+
+    long finalCost = new CompressionLoop(state, 42).compact();
+
+    // greedy inward pulls alone should walk b all the way up next to a
+    assertTrue("cost should drop well below " + initial + ", got " + finalCost,
+        finalCost < 100);
+    assertEquals(finalCost, state.cost());
+    java.awt.Rectangle bounds = state.getGrid().occupiedBounds();
+    assertTrue("board should be squeezed to 2 rows, got " + bounds.height,
+        bounds.height <= 1);
+    for (RoutedNet net : state.getRouting().getNets()) {
+      assertTrue(net.getFailedPins().isEmpty());
+    }
+  }
+
+  @Test
+  public void cancelMonitorStopsCompact() {
+    CompressionState state = sprawlingState(resistorAt(100, 100), resistorAt(100, 900));
+    long initial = state.cost();
+    CompressionLoop loop = new CompressionLoop(state, 42);
+    loop.setCancelMonitor(() -> true);
+
+    assertEquals(initial, loop.compact());
+    assertEquals(initial, state.cost());
+  }
+
+  @Test
   public void cancelMonitorStopsTheLoop() {
     CompressionState state = sprawlingState(resistorAt(100, 100), resistorAt(100, 900));
     long initial = state.cost();
