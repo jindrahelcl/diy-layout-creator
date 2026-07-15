@@ -88,6 +88,7 @@ public class LayoutCompressor implements IProjectEditor {
   private final Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider;
   private Function<IDIYComponent<?>, Collection<Area>> copperProvider;
   private int loopIterations = LOOP_ITERATIONS;
+  private long loopTimeBudget = LOOP_TIME_BUDGET_MS;
   private java.util.function.BooleanSupplier cancelMonitor = () -> false;
   private java.util.function.BooleanSupplier abortMonitor = () -> false;
   private java.util.function.BiConsumer<String, Double> progressListener = (phase, f) -> {};
@@ -157,6 +158,11 @@ public class LayoutCompressor implements IProjectEditor {
   /** Overrides the improvement loop's move budget; 0 disables the loop. */
   public void setLoopIterations(int loopIterations) {
     this.loopIterations = loopIterations;
+  }
+
+  /** Overrides the improvement loop's wall-clock budget; the best state so far is kept on timeout. */
+  public void setLoopTimeBudget(long loopTimeBudgetMs) {
+    this.loopTimeBudget = loopTimeBudgetMs;
   }
 
   /** Cancel hook for the loop: polled between moves; best state so far is kept on cancel. */
@@ -313,7 +319,7 @@ public class LayoutCompressor implements IProjectEditor {
     loop.setProgressListener(
         (fraction) -> progressListener.accept("Compacting", 0.15 + 0.75 * fraction));
     if (loopIterations > 0) {
-      loop.run(loopIterations, LOOP_TIME_BUDGET_MS);
+      loop.run(loopIterations, loopTimeBudget);
       // deterministic final squeeze: cost never increases, so this only ever helps
       loop.compact();
     }
