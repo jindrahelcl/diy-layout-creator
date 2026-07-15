@@ -252,7 +252,9 @@ Each milestone builds, passes existing tests, and is demoable. Sizes are rough.
   budget + cancel. *Accept:* on the M3 project set, mean board area and jumper count strictly
   improve vs. M3 output; equality still holds; 5 s default budget respected.
 - **M5 — Product polish (medium).** Result summary dialog with stats, progress + cancel UX,
-  options (time budget, wire colors/styles, margin), special-case handling from §4.5 hardened.
+  options (time budget, margin — wire colors/styles dropped from scope: emitted traces/jumpers
+  are ordinary components, restylable after the fact via the normal property panel), special-case
+  handling from §4.5 hardened.
   *Accept:* full manual smoke pass; regression harness green across the whole `.diy` corpus
   (compress succeeds or degrades gracefully with a clear message — never corrupts).
 - **M6 — Upstreaming (small).** Regression metrics report, screenshots, user-facing docs,

@@ -39,10 +39,15 @@ Engine (all logic, no UI) — `diylc/diylc-library/src/main/java/org/diylc/edito
 
 UI — `diylc/diylc-swing/src/main/java/org/diylc/swing/plugins/compressor/`: menu plugin +
 `CompressAction` ("Edit → Compress Layout"), which runs `LayoutCompressor.prepare(...)` in a
-background task behind `CompressProgressDialog` (phase label + progress bar; **Finish Now**
-stops the loop keeping the best state, **Cancel**/close aborts via the abort monitor —
-`CancelledException`, project untouched), then commits via `plugInPort.applyEditor(...)` on the
-EDT and shows a stats summary. Registered with 2 lines in `MainFrame.java`. The only other upstream touches:
+background task behind `CompressDialog` — one `JDialog` that cycles through content-pane
+states (`showParams`: time budget/margin spinners, feeding `LayoutCompressor.setLoopTimeBudget`/
+`setBoardMargin`, both now real setters instead of hardcoded constants — but `CompressAction`
+doesn't call `showParams` yet, it still jumps straight to `showProgress` with default values;
+`showProgress`: phase label + progress bar, **Finish Now** stops the loop keeping the best
+state, **Cancel**/close aborts via the abort monitor — `CancelledException`, project untouched;
+a report state to replace the plain stats popup is still to come), then commits via
+`plugInPort.applyEditor(...)` on the EDT and shows a stats summary. Registered with 2 lines in
+`MainFrame.java`. The only other upstream touches:
 ~11 lines in `NetlistBuilder.java` and the public `getBodyShapeBounds()` accessor on
 `AbstractLeadedComponent` (body geometry for footprints).
 
@@ -345,12 +350,28 @@ rescan; radii come from `setCopperProvider`, the drawn continuity-positive areas
 jumper ends re-escape on moves, and the annealer. Corpus (vs loop-off baseline): aaa 28×13/1
 jumper → 20×11/0; LM386 8 jumpers → 1; Rix Pro Jr **passes the gate** now, 12 jumpers → 3;
 Synth flat at 5 s (needs placement work). M5 progress/cancel UX is done (prepare/edit split,
-background task + `CompressProgressDialog`, wire z-order fix). Also done: `CompressionLoop.compact()`,
+background task + `CompressDialog`, wire z-order fix). Also done: `CompressionLoop.compact()`,
 a deterministic post-annealing squeeze pass (pull + atomic edge-peel) that closes the gap
 annealing alone leaves on boards where several parts share an edge — corpus: aaa 21×25→20×25,
-LM386 23×25→20×25, Rix Pro Jr 60×34→60×33, Synth jumpers 79→72. Next: rest of **M5** (options —
-time budget, wire colors, margin; §4.5 hardening; corpus-wide graceful degradation), **#19**
-initial placement quality (edge terminals, bypass caps near power pins), optional
-standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`; the fork is `origin` on the home Windows
-machine and `fork` on the office Linux machine — **never push to bancika's repo** (named
-`upstream` at home). Commit per substep, brief messages (subject + Co-Authored-By only).
+LM386 23×25→20×25, Rix Pro Jr 60×34→60×33, Synth jumpers 79→72.
+
+**In progress: M5 options dialog.** Goal: let the user set time budget and board margin before
+compressing, in one dialog that flows params → progress → report (replacing the separate stats
+popup). Done so far: `LayoutCompressor.setLoopTimeBudget`/`setBoardMargin` (engine-side, real
+setters instead of hardcoded constants — `Stats` now also reports the margin actually used);
+`CompressProgressDialog` renamed to `CompressDialog` and restructured around explicit
+content-pane states (`showParams`, `showProgress`). Not done yet: the report state (`showReport`,
+to replace `CompressAction.showStats`'s `swingUI.showMessage` popup); wiring `CompressAction` to
+actually call `showParams` first instead of jumping straight to `showProgress` with defaults —
+until that lands, the params screen exists but is dead code, not reachable from the menu. Wire
+colors/styles were deliberately dropped from scope (traces/jumpers are ordinary components,
+restylable after the fact via the normal property panel — a dedicated option would just
+duplicate existing UI). Not manually smoke-tested in the GUI yet.
+
+Next after that: §4.5 special-case hardening, corpus-wide graceful degradation sweep (all 34
+`.diy` files, not just the 4 spot-checked so far), **#19** initial placement quality (edge
+terminals, bypass caps near power pins — `compact()` above covers part of this already),
+optional standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`;
+the fork is `origin` on the home Windows machine and `fork` on the office Linux machine —
+**never push to bancika's repo** (named `upstream` at home). Commit per substep, brief messages
+(subject + Co-Authored-By only).
