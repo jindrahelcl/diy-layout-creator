@@ -75,11 +75,13 @@ public class CompressAction extends AbstractAction {
       return area == null ? null : area.getContinuityPositiveAreas();
     });
 
-    CompressProgressDialog progress = new CompressProgressDialog(swingUI.getOwnerFrame());
-    compressor.setCancelMonitor(progress::isFinishRequested);
-    compressor.setAbortMonitor(progress::isAborted);
-    compressor.setProgressListener(progress::reportProgress);
-    progress.setVisible(true);
+    CompressDialog dialog = new CompressDialog(swingUI.getOwnerFrame(),
+        LayoutCompressor.LOOP_TIME_BUDGET_MS, LayoutEmitter.BOARD_MARGIN_CELLS);
+    compressor.setCancelMonitor(dialog::isFinishRequested);
+    compressor.setAbortMonitor(dialog::isAborted);
+    compressor.setProgressListener(dialog::reportProgress);
+    dialog.showProgress();
+    dialog.setVisible(true);
 
     swingUI.executeBackgroundTask(new ITask<Void>() {
 
@@ -91,7 +93,7 @@ public class CompressAction extends AbstractAction {
 
       @Override
       public void failed(Exception e) {
-        progress.dispose();
+        dialog.dispose();
         Throwable cause = e.getCause() == null ? e : e.getCause();
         if (!(cause instanceof LayoutCompressor.CancelledException)) {
           swingUI.showMessage(cause.getMessage(), TITLE, ISwingUI.ERROR_MESSAGE);
@@ -100,7 +102,7 @@ public class CompressAction extends AbstractAction {
 
       @Override
       public void complete(Void result) {
-        progress.dispose();
+        dialog.dispose();
         // quick commit of the already verified result, as a single undoable edit
         plugInPort.applyEditor(compressor);
         showStats(compressor.getStats());

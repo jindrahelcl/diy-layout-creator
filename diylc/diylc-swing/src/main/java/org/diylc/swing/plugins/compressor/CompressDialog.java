@@ -24,6 +24,7 @@ package org.diylc.swing.plugins.compressor;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.awt.GridLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import javax.swing.BorderFactory;
@@ -32,41 +33,49 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 
 /**
- * Progress window for a running compression: phase label, progress bar, and two ways out —
- * "Finish Now" stops the compacting loop early and keeps the best layout found so far, while
- * "Cancel" (or closing the window) aborts the whole run leaving the project untouched. The
- * flags are polled by the compressor from its worker thread; {@link #reportProgress} may be
- * called from any thread.
+ * One dialog window for the whole "Compress Layout" flow, cycling through content-pane states as
+ * the run progresses: parameters ({@link #showParams}, before the run), progress
+ * ({@link #showProgress}, during), and eventually a report after completion. On the progress
+ * screen, "Finish Now" stops the compacting loop early and keeps the best layout found so far,
+ * while "Cancel" (or closing the window) aborts the whole run leaving the project untouched. The
+ * abort/finish flags are polled by the compressor from its worker thread; {@link #reportProgress}
+ * may be called from any thread — everything else is event-thread only.
  *
  * @author Layout Compressor contributors
  */
-public class CompressProgressDialog extends JDialog {
+public class CompressDialog extends JDialog {
 
   private static final long serialVersionUID = 1L;
 
-  private final JLabel phaseLabel;
-  private final JProgressBar progressBar;
+  private final JSpinner timeBudgetSpinner;
+  private final JSpinner marginSpinner;
+  private final JLabel phaseLabel = new JLabel("Starting...");
+  private final JProgressBar progressBar = new JProgressBar(0, 100);
   private final JButton finishButton;
 
   private volatile boolean finishRequested;
   private volatile boolean aborted;
+  private Runnable windowCloseAction = this::dispose;
 
-  public CompressProgressDialog(Frame owner) {
+  public CompressDialog(Frame owner, long defaultTimeBudgetMs, int defaultMarginCells) {
     super(owner, "Layout Compressor", false);
     setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
     addWindowListener(new WindowAdapter() {
 
       @Override
       public void windowClosing(WindowEvent e) {
-        aborted = true;
+        windowCloseAction.run();
       }
     });
 
-    phaseLabel = new JLabel("Starting...");
-    progressBar = new JProgressBar(0, 100);
+    timeBudgetSpinner = new JSpinner(
+        new SpinnerNumberModel((int) Math.max(1, defaultTimeBudgetMs / 1000), 1, 60, 1));
+    marginSpinner = new JSpinner(new SpinnerNumberModel(defaultMarginCells, 0, 5, 1));
 
     finishButton = new JButton("Finish Now");
     finishButton.setToolTipText("Stop optimizing and keep the best layout found so far");
@@ -74,6 +83,63 @@ public class CompressProgressDialog extends JDialog {
       finishRequested = true;
       finishButton.setEnabled(false);
     });
+
+    setLocationRelativeTo(owner);
+  }
+
+  /** Time budget chosen on the params screen, in milliseconds. */
+  public long getTimeBudgetMs() {
+    return ((Integer) timeBudgetSpinner.getValue()) * 1000L;
+  }
+
+  /** Board margin chosen on the params screen, in cells. */
+  public int getBoardMargin() {
+    return (Integer) marginSpinner.getValue();
+  }
+
+  /**
+   * Shows the parameter screen: time budget and board margin spinners. {@code onCompress} runs
+   * when the user clicks "Compress"; {@code onCancel} runs on "Cancel" or the window close box,
+   * after the dialog has already been disposed.
+   */
+  public void showParams(Runnable onCompress, Runnable onCancel) {
+    windowCloseAction = () -> {
+      dispose();
+      onCancel.run();
+    };
+
+    JPanel form = new JPanel(new GridLayout(2, 2, 8, 8));
+    form.add(new JLabel("Time budget (seconds):"));
+    form.add(timeBudgetSpinner);
+    form.add(new JLabel("Board margin (cells):"));
+    form.add(marginSpinner);
+
+    JButton compressButton = new JButton("Compress");
+    compressButton.addActionListener((e) -> onCompress.run());
+    JButton cancelButton = new JButton("Cancel");
+    cancelButton.addActionListener((e) -> {
+      dispose();
+      onCancel.run();
+    });
+    JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+    buttons.add(compressButton);
+    buttons.add(cancelButton);
+
+    JPanel content = new JPanel(new BorderLayout(0, 12));
+    content.setBorder(BorderFactory.createEmptyBorder(12, 16, 8, 16));
+    content.add(form, BorderLayout.CENTER);
+    content.add(buttons, BorderLayout.SOUTH);
+    setContentPane(content);
+    setSize(320, 160);
+    setLocationRelativeTo(getOwner());
+  }
+
+  /** Shows the progress screen: phase label, progress bar, "Finish Now" and "Cancel". */
+  public void showProgress() {
+    windowCloseAction = () -> aborted = true;
+    finishRequested = false;
+    finishButton.setEnabled(true);
+
     JButton cancelButton = new JButton("Cancel");
     cancelButton.setToolTipText("Abort and leave the project unchanged");
     cancelButton.addActionListener((e) -> aborted = true);
@@ -87,9 +153,8 @@ public class CompressProgressDialog extends JDialog {
     buttons.add(cancelButton);
     content.add(buttons, BorderLayout.SOUTH);
     setContentPane(content);
-
     setSize(360, 130);
-    setLocationRelativeTo(owner);
+    setLocationRelativeTo(getOwner());
   }
 
   /** True once the user asked to stop the loop early, keeping the best result so far. */
