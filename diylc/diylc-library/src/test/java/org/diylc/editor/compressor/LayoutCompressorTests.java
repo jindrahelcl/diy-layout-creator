@@ -177,4 +177,54 @@ public class LayoutCompressorTests {
     assertTrue(connected(project, byName(project, "R1"), 0, newR2, 0));
     assertEquals(1, compressor.getStats().movedParts());
   }
+
+  @Test
+  public void prepareLeavesProjectUntouchedUntilEditCommits() {
+    Resistor r1 = resistor("R1", 100, 100);
+    Resistor r2 = resistor("R2", 2000, 1500);
+    Project project = new Project();
+    project.getComponents().add(r1);
+    project.getComponents().add(r2);
+    project.getComponents().add(connect(r1.getControlPoint(1), r2.getControlPoint(0)));
+
+    LayoutCompressor compressor =
+        new LayoutCompressor(new ArrayList<ContinuityArea>(), null);
+    List<String> phases = new ArrayList<String>();
+    compressor.setProgressListener((phase, fraction) -> phases.add(phase));
+    compressor.prepare(project);
+
+    // prepared but not committed: same components, R1 not moved
+    assertEquals(3, project.getComponents().size());
+    assertEquals(new Point2D.Double(100, 100), r1.getControlPoint(0));
+    assertNotNull(compressor.getStats());
+    assertTrue(phases.contains("Compacting"));
+    assertEquals("Done", phases.get(phases.size() - 1));
+
+    compressor.edit(project, Set.of());
+    assertTrue(project.getComponents().get(0) instanceof PerfBoard);
+    assertTrue(connected(project, byName(project, "R1"), 1, byName(project, "R2"), 0));
+  }
+
+  @Test
+  public void abortThrowsAndLeavesProjectUntouched() {
+    Resistor r1 = resistor("R1", 100, 100);
+    Resistor r2 = resistor("R2", 2000, 1500);
+    Project project = new Project();
+    project.getComponents().add(r1);
+    project.getComponents().add(r2);
+    project.getComponents().add(connect(r1.getControlPoint(1), r2.getControlPoint(0)));
+    List<IDIYComponent<?>> before = new ArrayList<IDIYComponent<?>>(project.getComponents());
+
+    LayoutCompressor compressor =
+        new LayoutCompressor(new ArrayList<ContinuityArea>(), null);
+    compressor.setAbortMonitor(() -> true);
+    try {
+      compressor.prepare(project);
+      throw new AssertionError("expected CancelledException");
+    } catch (LayoutCompressor.CancelledException e) {
+      // expected
+    }
+    assertEquals(before, project.getComponents());
+    assertEquals(new Point2D.Double(100, 100), r1.getControlPoint(0));
+  }
 }

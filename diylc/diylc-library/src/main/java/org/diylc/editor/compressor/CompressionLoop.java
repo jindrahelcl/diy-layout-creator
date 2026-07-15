@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.function.BooleanSupplier;
+import java.util.function.DoubleConsumer;
 
 import org.diylc.editor.compressor.GridModel.Cell;
 import org.diylc.editor.compressor.PlacementSeeder.Placement;
@@ -49,9 +50,13 @@ public class CompressionLoop {
 
   private static final int[][] SLIDE_DELTAS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
+  /** How many iterations between progress reports. */
+  private static final int PROGRESS_STRIDE = 25;
+
   private final CompressionState state;
   private final Random random;
   private BooleanSupplier cancelled = () -> false;
+  private DoubleConsumer progressListener = (fraction) -> {};
 
   /** The state must be fully routed (see {@link CompressionState#rerouteAll()}). */
   public CompressionLoop(CompressionState state, long seed) {
@@ -62,6 +67,15 @@ public class CompressionLoop {
   /** Polled every iteration; when true the loop stops and keeps the best state so far. */
   public void setCancelMonitor(BooleanSupplier cancelled) {
     this.cancelled = cancelled;
+  }
+
+  /**
+   * Receives the loop's progress as a fraction in [0, 1] — whichever of iteration count and
+   * wall-clock budget is further along — every {@value #PROGRESS_STRIDE} iterations. May be
+   * called from whatever thread runs the loop.
+   */
+  public void setProgressListener(DoubleConsumer progressListener) {
+    this.progressListener = progressListener;
   }
 
   /** Attempts the given number of random moves; returns the (global best) final cost. */
@@ -80,6 +94,12 @@ public class CompressionLoop {
     for (int i = 0; i < iterations; i++) {
       if (cancelled.getAsBoolean() || System.currentTimeMillis() >= deadline) {
         break;
+      }
+      if (i % PROGRESS_STRIDE == 0) {
+        double iterationFraction = i / (double) iterations;
+        double timeFraction = deadline == Long.MAX_VALUE ? 0
+            : 1 - (deadline - System.currentTimeMillis()) / (double) timeBudgetMs;
+        progressListener.accept(Math.max(iterationFraction, timeFraction));
       }
       double temperature = startTemperature
           * Math.pow(END_TEMPERATURE / startTemperature, i / (double) iterations);

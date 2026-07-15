@@ -75,12 +75,28 @@ public class LayoutCompressor implements IProjectEditor {
       int jumperCrossings, int movedParts, int remoteParts, int flyingWires) {
   }
 
+  /** Thrown when the abort monitor fires; the project is guaranteed untouched. */
+  public static class CancelledException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
+    public CancelledException() {
+      super("Compression cancelled — the project was left untouched.");
+    }
+  }
+
   private final List<ContinuityArea> continuityAreas;
   private final Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider;
   private Function<IDIYComponent<?>, Collection<Area>> copperProvider;
   private int loopIterations = LOOP_ITERATIONS;
   private java.util.function.BooleanSupplier cancelMonitor = () -> false;
+  private java.util.function.BooleanSupplier abortMonitor = () -> false;
+  private java.util.function.BiConsumer<String, Double> progressListener = (phase, f) -> {};
   private Stats stats;
+
+  // set by prepare(); edit() commits them to the real project
+  private Project preparedFor;
+  private Project scratch;
+  private Set<IDIYComponent<?>> emitted;
 
   public LayoutCompressor(List<ContinuityArea> continuityAreas,
       Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider) {
@@ -148,8 +164,56 @@ public class LayoutCompressor implements IProjectEditor {
     this.cancelMonitor = cancelled;
   }
 
+  /**
+   * Abort hook for the whole pipeline: polled between phases and during the loop; when it
+   * fires, {@link #prepare} throws {@link CancelledException} and the project stays untouched.
+   */
+  public void setAbortMonitor(java.util.function.BooleanSupplier aborted) {
+    this.abortMonitor = aborted;
+  }
+
+  /**
+   * Receives (phase label, overall fraction in [0, 1]) as the pipeline advances. Called from
+   * whatever thread runs {@link #prepare}.
+   */
+  public void setProgressListener(java.util.function.BiConsumer<String, Double> listener) {
+    this.progressListener = listener;
+  }
+
+  private void phase(String label, double fraction) {
+    if (abortMonitor.getAsBoolean()) {
+      throw new CancelledException();
+    }
+    progressListener.accept(label, fraction);
+  }
+
+  /**
+   * Commits the prepared, verified result. All heavy lifting happens in {@link #prepare},
+   * which is safe to run off the UI thread; this method only copies the finished components
+   * back (running prepare itself when the caller didn't).
+   */
   @Override
   public Set<IDIYComponent<?>> edit(Project project, Set<IDIYComponent<?>> selection) {
+    if (preparedFor != project) {
+      prepare(project);
+    }
+
+    project.getComponents().clear();
+    project.getComponents().addAll(scratch.getComponents());
+    project.getLockedComponents().clear();
+    project.getLockedComponents().addAll(scratch.getLockedComponents());
+    project.getGroupsEx().clear();
+    project.getGroupsEx().addAll(scratch.getGroupsEx());
+    return emitted;
+  }
+
+  /**
+   * Runs the whole pipeline — classify, place, route, compact, emit, verify — on a scratch
+   * clone of the project, without touching the project itself. Throws on verification failure
+   * or abort; on success {@link #edit} commits the result and {@link #getStats} reports it.
+   */
+  public void prepare(Project project) {
+    phase("Analyzing the layout", 0.0);
     ComponentClassifier classifier = new ComponentClassifier();
     Classification beforeClassification = classifier.classify(project);
     List<Group> nets = NetExtractor.extractNets(project, continuityAreas,
@@ -158,7 +222,7 @@ public class LayoutCompressor implements IProjectEditor {
 
     // all mutations happen on a scratch clone; the clone preserves component order, which maps
     // originals to their clones (and net nodes with them)
-    Project scratch = project.clone();
+    scratch = project.clone();
     Map<IDIYComponent<?>, IDIYComponent<?>> toScratch =
         new IdentityHashMap<IDIYComponent<?>, IDIYComponent<?>>();
     for (int i = 0; i < project.getComponents().size(); i++) {
@@ -185,6 +249,7 @@ public class LayoutCompressor implements IProjectEditor {
       }
     }
 
+    phase("Placing parts", 0.05);
     Seed seed = new PlacementSeeder().seed(movable);
     if (seed.placements().isEmpty()) {
       throw new RuntimeException("No on-grid parts to place; nothing to compress.");
@@ -238,13 +303,18 @@ public class LayoutCompressor implements IProjectEditor {
     }
 
     // route the legalized placement, then let the improvement loop compact it
+    phase("Routing", 0.10);
     CompressionState state = new CompressionState(grid, legalized.placements(), fixedPinCells,
         netPins, ROUTING_MARGIN_CELLS);
     state.rerouteAll();
+    phase("Compacting", 0.15);
     CompressionLoop loop = new CompressionLoop(state, LOOP_SEED);
-    loop.setCancelMonitor(cancelMonitor);
+    loop.setCancelMonitor(() -> cancelMonitor.getAsBoolean() || abortMonitor.getAsBoolean());
+    loop.setProgressListener(
+        (fraction) -> progressListener.accept("Compacting", 0.15 + 0.75 * fraction));
     loop.run(loopIterations, LOOP_TIME_BUDGET_MS);
 
+    phase("Emitting the layout", 0.90);
     List<Placement> placements = state.getPlacements();
     RoutingResult routing = state.getRouting();
     List<List<Cell>> netCells = state.netCells();
@@ -264,7 +334,7 @@ public class LayoutCompressor implements IProjectEditor {
     // nearest board pin of its net (pins always carry wire endpoints, mid-run cells may not),
     // or pin to pin when the whole net is remote
     int flyingWires = 0;
-    Set<IDIYComponent<?>> emitted = new HashSet<IDIYComponent<?>>(emission.wires());
+    emitted = new HashSet<IDIYComponent<?>>(emission.wires());
     if (emission.board() != null) {
       emitted.add(emission.board());
     }
@@ -291,6 +361,7 @@ public class LayoutCompressor implements IProjectEditor {
     // verification gate: netlist before == netlist after, using the compressor's own node
     // rule; on mismatch the real project has not been touched. Emitted traces conduct via
     // continuity areas, which only exist after a draw pass — hence the scan.
+    phase("Verifying connectivity", 0.92);
     Classification afterClassification = classifier.classify(scratch);
     List<Group> afterNets = NetExtractor.extractNets(scratch, ContinuityScanner.scan(scratch),
         afterClassification.getRealParts());
@@ -302,17 +373,11 @@ public class LayoutCompressor implements IProjectEditor {
               afterClassification.getRealParts()));
     }
 
-    project.getComponents().clear();
-    project.getComponents().addAll(scratch.getComponents());
-    project.getLockedComponents().clear();
-    project.getLockedComponents().addAll(scratch.getLockedComponents());
-    project.getGroupsEx().clear();
-    project.getGroupsEx().addAll(scratch.getGroupsEx());
-
     stats = new Stats(emission.board() == null ? null : grid.occupiedBounds(), nets.size(),
         routing.getTotalWireLength(), routing.getJumperCount(), routing.getJumperCrossings(),
         placements.size(), remote.size(), flyingWires);
-    return emitted;
+    preparedFor = project;
+    phase("Done", 1.0);
   }
 
   private static Cell nearestCell(Point2D pin, Iterable<Cell> candidates) {

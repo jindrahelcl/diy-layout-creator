@@ -26,6 +26,7 @@ import java.util.List;
 import javax.swing.AbstractAction;
 
 import org.diylc.common.IPlugInPort;
+import org.diylc.common.ITask;
 import org.diylc.editor.compressor.LayoutCompressor;
 import org.diylc.editor.compressor.LayoutEmitter;
 import org.diylc.presenter.ComponentArea;
@@ -35,9 +36,11 @@ import org.diylc.swing.ISwingUI;
 import org.diylc.utils.IconLoader;
 
 /**
- * Runs the layout compressor as a single undoable edit and reports the outcome. The editor
- * verifies netlist equality itself and aborts without touching the project on mismatch (the
- * presenter then shows its generic error dialog and logs the diff).
+ * Runs the layout compressor as a single undoable edit and reports the outcome. The heavy
+ * pipeline ({@link LayoutCompressor#prepare}) runs on a background thread behind a progress
+ * dialog with finish-early and cancel; only the quick commit of the verified result goes
+ * through {@code applyEditor} on the event thread. Verification failure or cancel leaves the
+ * project untouched.
  *
  * @author Layout Compressor contributors
  */
@@ -72,9 +75,40 @@ public class CompressAction extends AbstractAction {
       return area == null ? null : area.getContinuityPositiveAreas();
     });
 
-    plugInPort.applyEditor(compressor);
+    CompressProgressDialog progress = new CompressProgressDialog(swingUI.getOwnerFrame());
+    compressor.setCancelMonitor(progress::isFinishRequested);
+    compressor.setAbortMonitor(progress::isAborted);
+    compressor.setProgressListener(progress::reportProgress);
+    progress.setVisible(true);
 
-    LayoutCompressor.Stats stats = compressor.getStats();
+    swingUI.executeBackgroundTask(new ITask<Void>() {
+
+      @Override
+      public Void doInBackground() throws Exception {
+        compressor.prepare(plugInPort.getCurrentProject());
+        return null;
+      }
+
+      @Override
+      public void failed(Exception e) {
+        progress.dispose();
+        Throwable cause = e.getCause() == null ? e : e.getCause();
+        if (!(cause instanceof LayoutCompressor.CancelledException)) {
+          swingUI.showMessage(cause.getMessage(), TITLE, ISwingUI.ERROR_MESSAGE);
+        }
+      }
+
+      @Override
+      public void complete(Void result) {
+        progress.dispose();
+        // quick commit of the already verified result, as a single undoable edit
+        plugInPort.applyEditor(compressor);
+        showStats(compressor.getStats());
+      }
+    }, true);
+  }
+
+  private void showStats(LayoutCompressor.Stats stats) {
     if (stats == null) {
       // the presenter already showed its error dialog; nothing was changed
       return;

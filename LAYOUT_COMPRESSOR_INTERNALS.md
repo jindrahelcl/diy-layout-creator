@@ -38,8 +38,11 @@ Engine (all logic, no UI) — `diylc/diylc-library/src/main/java/org/diylc/edito
 | `CompressionSurvey` | M0/M1 stats for the preview dialog; not part of the compress pipeline. |
 
 UI — `diylc/diylc-swing/src/main/java/org/diylc/swing/plugins/compressor/`: menu plugin +
-`CompressAction` ("Edit → Compress Layout"), which calls `plugInPort.applyEditor(...)` and shows
-a stats summary. Registered with 2 lines in `MainFrame.java`. The only other upstream touches:
+`CompressAction` ("Edit → Compress Layout"), which runs `LayoutCompressor.prepare(...)` in a
+background task behind `CompressProgressDialog` (phase label + progress bar; **Finish Now**
+stops the loop keeping the best state, **Cancel**/close aborts via the abort monitor —
+`CancelledException`, project untouched), then commits via `plugInPort.applyEditor(...)` on the
+EDT and shows a stats summary. Registered with 2 lines in `MainFrame.java`. The only other upstream touches:
 ~11 lines in `NetlistBuilder.java` and the public `getBodyShapeBounds()` accessor on
 `AbstractLeadedComponent` (body geometry for footprints).
 
@@ -122,7 +125,15 @@ Built by `Footprint.of(component, bodyBoundsPx)`:
   Rectangles may overlap each other and the pin cells; consumers handle that (occupy skips pin
   cells; the grid's body sets dedupe).
 
-## Pipeline (`LayoutCompressor.edit`) step by step
+## Pipeline (`LayoutCompressor.prepare` + `edit`) step by step
+
+The pipeline is split for the UI: `prepare(project)` does steps 1–10 (everything heavy, safe
+off the EDT — it never mutates the project) and `edit(...)` only performs step 11's copy-back,
+running `prepare` itself when the caller didn't (headless tools, tests). Hooks:
+`setProgressListener((phase, fraction) -> ...)` reports pipeline progress (the loop dominates,
+mapped to 0.15–0.90); `setAbortMonitor` aborts the whole run with `CancelledException` (polled
+at phase boundaries and inside the loop); `setCancelMonitor` only stops the loop early, keeping
+the best state.
 
 1. **Classify + extract nets** on the *original* project, using the continuity areas the caller
    provides (the GUI passes the DrawingManager's; headless tools must draw first — see below).
@@ -311,8 +322,10 @@ pads at 16 px radius were touching adjacent-hole traces and merging nets in the 
 rescan; radii come from `setCopperProvider`, the drawn continuity-positive areas), body-covered
 jumper ends re-escape on moves, and the annealer. Corpus (vs loop-off baseline): aaa 28×13/1
 jumper → 20×11/0; LM386 8 jumpers → 1; Rix Pro Jr **passes the gate** now, 12 jumpers → 3;
-Synth flat at 5 s (needs placement work). Next: **M5** polish (progress/cancel UI — engine
-hook exists), **#19** initial placement quality (edge terminals, bypass caps near power pins),
-optional standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`; the fork is `origin` on the home Windows
+Synth flat at 5 s (needs placement work). M5 progress/cancel UX is done (prepare/edit split,
+background task + `CompressProgressDialog`, wire z-order fix). Next: rest of **M5** (options —
+time budget, wire colors, margin; §4.5 hardening; corpus-wide graceful degradation), **#19**
+initial placement quality (edge terminals, bypass caps near power pins), optional
+standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`; the fork is `origin` on the home Windows
 machine and `fork` on the office Linux machine — **never push to bancika's repo** (named
 `upstream` at home). Commit per substep, brief messages (subject + Co-Authored-By only).
