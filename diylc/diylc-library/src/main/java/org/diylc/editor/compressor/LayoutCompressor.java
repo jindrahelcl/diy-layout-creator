@@ -71,8 +71,8 @@ public class LayoutCompressor implements IProjectEditor {
   public static final long LOOP_SEED = 42;
 
   /** Outcome stats for the result dialog. */
-  public record Stats(Rectangle boardCells, int netCount, int wireLength, int jumperCount,
-      int jumperCrossings, int movedParts, int remoteParts, int flyingWires) {
+  public record Stats(Rectangle boardCells, int boardMargin, int netCount, int wireLength,
+      int jumperCount, int jumperCrossings, int movedParts, int remoteParts, int flyingWires) {
   }
 
   /** Thrown when the abort monitor fires; the project is guaranteed untouched. */
@@ -89,6 +89,7 @@ public class LayoutCompressor implements IProjectEditor {
   private Function<IDIYComponent<?>, Collection<Area>> copperProvider;
   private int loopIterations = LOOP_ITERATIONS;
   private long loopTimeBudget = LOOP_TIME_BUDGET_MS;
+  private int boardMargin = LayoutEmitter.BOARD_MARGIN_CELLS;
   private java.util.function.BooleanSupplier cancelMonitor = () -> false;
   private java.util.function.BooleanSupplier abortMonitor = () -> false;
   private java.util.function.BiConsumer<String, Double> progressListener = (phase, f) -> {};
@@ -163,6 +164,11 @@ public class LayoutCompressor implements IProjectEditor {
   /** Overrides the improvement loop's wall-clock budget; the best state so far is kept on timeout. */
   public void setLoopTimeBudget(long loopTimeBudgetMs) {
     this.loopTimeBudget = loopTimeBudgetMs;
+  }
+
+  /** Overrides the board's margin beyond the occupied cells, in cells. */
+  public void setBoardMargin(int boardMargin) {
+    this.boardMargin = boardMargin;
   }
 
   /** Cancel hook for the loop: polled between moves; best state so far is kept on cancel. */
@@ -338,7 +344,7 @@ public class LayoutCompressor implements IProjectEditor {
     }
     LayoutEmitter emitter = new LayoutEmitter();
     LayoutEmitter.Emission emission = emitter.emit(scratch, placements, routing,
-        grid.occupiedBounds(), allPinCells);
+        grid.occupiedBounds(), allPinCells, boardMargin);
 
     // hook up remote (off-grid / locked off-grid) pins with flying wires: each pin to the
     // nearest board pin of its net (pins always carry wire endpoints, mid-run cells may not),
@@ -383,9 +389,9 @@ public class LayoutCompressor implements IProjectEditor {
               afterClassification.getRealParts()));
     }
 
-    stats = new Stats(emission.board() == null ? null : grid.occupiedBounds(), nets.size(),
-        routing.getTotalWireLength(), routing.getJumperCount(), routing.getJumperCrossings(),
-        placements.size(), remote.size(), flyingWires);
+    stats = new Stats(emission.board() == null ? null : grid.occupiedBounds(), boardMargin,
+        nets.size(), routing.getTotalWireLength(), routing.getJumperCount(),
+        routing.getJumperCrossings(), placements.size(), remote.size(), flyingWires);
     preparedFor = project;
     phase("Done", 1.0);
   }

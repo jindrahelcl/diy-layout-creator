@@ -58,15 +58,21 @@ public class LayoutEmitter {
   public record Emission(List<IDIYComponent<?>> wires, PerfBoard board) {
   }
 
+  /** Same as {@link #emit(Project, List, RoutingResult, Rectangle, Set, int)}, with the default margin. */
+  public Emission emit(Project project, List<Placement> placements, RoutingResult routing,
+      Rectangle boardCells, Set<Cell> pinCells) {
+    return emit(project, placements, routing, boardCells, pinCells, BOARD_MARGIN_CELLS);
+  }
+
   /**
    * Applies placements and adds wires and the board to the project. {@code boardCells} is the
    * cell-space bounding box to wrap (typically the grid's occupied bounds); the board gets a
-   * one-cell margin beyond it. {@code pinCells} holds every cell occupied by a pin: DIYLC only
-   * connects wires at their endpoints, so emitted segments must break wherever a run touches a
-   * pin or another wire of the net, even mid-straight.
+   * {@code marginCells}-cell margin beyond it. {@code pinCells} holds every cell occupied by a
+   * pin: DIYLC only connects wires at their endpoints, so emitted segments must break wherever a
+   * run touches a pin or another wire of the net, even mid-straight.
    */
   public Emission emit(Project project, List<Placement> placements, RoutingResult routing,
-      Rectangle boardCells, Set<Cell> pinCells) {
+      Rectangle boardCells, Set<Cell> pinCells, int marginCells) {
     for (Placement placement : placements) {
       move(placement);
     }
@@ -113,11 +119,11 @@ public class LayoutEmitter {
     if (boardCells != null) {
       board = new PerfBoard();
       board.setName(nextName(names, "Board"));
-      board.setControlPoint(GridModel.toPixels(new Cell(boardCells.x - BOARD_MARGIN_CELLS,
-          boardCells.y - BOARD_MARGIN_CELLS)), 0);
+      board.setControlPoint(GridModel.toPixels(new Cell(boardCells.x - marginCells,
+          boardCells.y - marginCells)), 0);
       board.setControlPoint(GridModel.toPixels(
-          new Cell(boardCells.x + boardCells.width + BOARD_MARGIN_CELLS,
-              boardCells.y + boardCells.height + BOARD_MARGIN_CELLS)), 1);
+          new Cell(boardCells.x + boardCells.width + marginCells,
+              boardCells.y + boardCells.height + marginCells)), 1);
       project.getComponents().add(0, board);
     }
     return new Emission(wires, board);
