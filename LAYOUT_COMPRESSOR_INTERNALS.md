@@ -211,10 +211,14 @@ fully routed** between moves.
   Crossings = pairs of jumper wires that touch or cross anywhere except a shared endpoint
   (`RoutingResult.getJumperCrossings` / `segmentsCross`).
 
-`CompressionLoop.run(iterations, timeBudgetMs)`: seeded `Random`; per iteration one move —
-SLIDE ±1 cell (4⁄8 odds, the workhorse), ROTATE (random other orientation), STRETCH span ±1,
-REROUTE random net, UNJUMP random jumpered net — kept only on strict cost decrease, else
-`undoMove()`. SWAP is deferred to M4b-if-needed; the annealer will replace the acceptance rule.
+`CompressionLoop.run(iterations, timeBudgetMs)`: **simulated annealing**, seeded `Random`; per
+iteration one move — SLIDE ±1 cell (4⁄8 odds, the workhorse), ROTATE, STRETCH span ±1, REROUTE
+random net, UNJUMP random jumpered net. Better states always accepted; worse with
+`exp(-Δ/T)`, T cooling geometrically from 5% of the initial cost to 0.5 by **iteration**
+progress (deterministic per seed; wall clock only stops early). The global best is snapshotted
+(`CompressionState.snapshot()/restore()` — placements + wires + nets + pin retags) and
+restored at the end, so timeout/cancel (`setCancelMonitor`) never lose progress. Defaults in
+`LayoutCompressor`: 2000 iterations, 5 s budget, seed 42. SWAP move still deferred.
 
 ## LayoutEmitter
 
@@ -297,16 +301,18 @@ Oscllator_v1* (92 nets, the stress test).
 
 ## Current state and where work continues
 
-Done: M0–M3 (survey, world model, router, end-to-end normalization + UI), M4a (greedy loop),
-the radial body-overlap fix, jumper endpoint escaping (free holes + stub traces), and the
-jumper-crossing penalty. Open, in agreed order: **#17** natural lead spans (normalize spans to
-body-derived natural length at seeding, add a span-deviation cost term so STRETCH fine-tunes;
-optional standing-mount mode), **#18** net-merging emission bug (pre-existing M3 emission
-defect — suspects: emitted copper touching foreign pads by area overlap in the continuity
-scan, turret node naming, traces grazing pads on dense boards), then **M4b** annealer
-(geometric cooling, ~5 s wall-clock budget, cancel hook, global-best tracking) + 4.6 corpus
-validation, and later initial-placement quality (**#19**: edge terminals, bypass caps near
-power pins — deep jumper-tangle reduction on dense boards depends on this and on M4b's real
-loop budget). Git: branch `layout-compressor`; the fork is `origin` on the home Windows
+Done through **M4b** (2026-07-15): M0–M3, M4a, body-overlap fix, jumper endpoint escaping
+(free holes + stub traces, widened search + any-hole fallback), jumper-crossing penalty
+(target bias 8 + cost 15/pair), **#17** natural-span normalization (radials → designed lead
+spacing, axials → body length; `SPAN_WEIGHT = 3` deviation cost), **#18** fixed via
+**pad-clearance halos** (`GridModel.claimPadHalo`: pins whose drawn pad radius +
+`TRACE_CLEARANCE_PX = 6` exceeds a cell block neighboring holes for foreign runs — turret
+pads at 16 px radius were touching adjacent-hole traces and merging nets in the continuity
+rescan; radii come from `setCopperProvider`, the drawn continuity-positive areas), body-covered
+jumper ends re-escape on moves, and the annealer. Corpus (vs loop-off baseline): aaa 28×13/1
+jumper → 20×11/0; LM386 8 jumpers → 1; Rix Pro Jr **passes the gate** now, 12 jumpers → 3;
+Synth flat at 5 s (needs placement work). Next: **M5** polish (progress/cancel UI — engine
+hook exists), **#19** initial placement quality (edge terminals, bypass caps near power pins),
+optional standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`; the fork is `origin` on the home Windows
 machine and `fork` on the office Linux machine — **never push to bancika's repo** (named
 `upstream` at home). Commit per substep, brief messages (subject + Co-Authored-By only).
