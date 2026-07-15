@@ -58,7 +58,7 @@ public class CompressionLoopTests {
   }
 
   @Test
-  public void greedyDescentPullsSprawlingPartsTogether() {
+  public void annealingPullsSprawlingPartsTogether() {
     Resistor a = resistorAt(100, 100);
     Resistor b = resistorAt(100, 900);
     CompressionState state = sprawlingState(a, b);
@@ -66,7 +66,7 @@ public class CompressionLoopTests {
     // extent (5 + 9) * 10 + 10 wire + 6 span deviation (spans 4, natural 5)
     assertEquals(162, initial);
 
-    long finalCost = new CompressionLoop(state, 42).run(300);
+    long finalCost = new CompressionLoop(state, 42).run(1500);
 
     // b can slide all the way up to the row below a: extent 5+2 cols/rows, wire length 2
     assertTrue("cost should drop well below " + initial + ", got " + finalCost,
@@ -89,12 +89,24 @@ public class CompressionLoopTests {
   }
 
   @Test
-  public void greedyNeverAcceptsAWorseState() {
+  public void bestStateIsRestoredSoResultNeverWorsens() {
     CompressionState state = sprawlingState(resistorAt(100, 100), resistorAt(100, 900));
     long initial = state.cost();
 
     long finalCost = new CompressionLoop(state, 1).run(50);
 
     assertTrue(finalCost <= initial);
+    assertEquals(finalCost, state.cost());
+  }
+
+  @Test
+  public void cancelMonitorStopsTheLoop() {
+    CompressionState state = sprawlingState(resistorAt(100, 100), resistorAt(100, 900));
+    long initial = state.cost();
+    CompressionLoop loop = new CompressionLoop(state, 42);
+    loop.setCancelMonitor(() -> true);
+
+    assertEquals(initial, loop.run(1000));
+    assertEquals(initial, state.cost());
   }
 }

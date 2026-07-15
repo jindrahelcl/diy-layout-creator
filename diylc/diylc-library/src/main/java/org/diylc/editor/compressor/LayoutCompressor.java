@@ -61,11 +61,11 @@ public class LayoutCompressor implements IProjectEditor {
   /** Extra routing room around the occupied area, in cells. */
   public static final int ROUTING_MARGIN_CELLS = 2;
 
-  /** Random moves the improvement loop attempts (greedy descent for now). */
+  /** Random moves the annealing loop attempts. */
   public static final int LOOP_ITERATIONS = 2000;
 
-  /** Hard stop for the loop on large projects; a proper budget arrives with the annealer. */
-  public static final long LOOP_TIME_BUDGET_MS = 15_000;
+  /** Wall-clock budget for the loop; the best state found so far is kept on timeout. */
+  public static final long LOOP_TIME_BUDGET_MS = 5_000;
 
   /** Fixed loop seed: same input, same output — easier to reason about results. */
   public static final long LOOP_SEED = 42;
@@ -79,6 +79,7 @@ public class LayoutCompressor implements IProjectEditor {
   private final Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider;
   private Function<IDIYComponent<?>, Collection<Area>> copperProvider;
   private int loopIterations = LOOP_ITERATIONS;
+  private java.util.function.BooleanSupplier cancelMonitor = () -> false;
   private Stats stats;
 
   public LayoutCompressor(List<ContinuityArea> continuityAreas,
@@ -140,6 +141,11 @@ public class LayoutCompressor implements IProjectEditor {
   /** Overrides the improvement loop's move budget; 0 disables the loop. */
   public void setLoopIterations(int loopIterations) {
     this.loopIterations = loopIterations;
+  }
+
+  /** Cancel hook for the loop: polled between moves; best state so far is kept on cancel. */
+  public void setCancelMonitor(java.util.function.BooleanSupplier cancelled) {
+    this.cancelMonitor = cancelled;
   }
 
   @Override
@@ -235,7 +241,9 @@ public class LayoutCompressor implements IProjectEditor {
     CompressionState state = new CompressionState(grid, legalized.placements(), fixedPinCells,
         netPins, ROUTING_MARGIN_CELLS);
     state.rerouteAll();
-    new CompressionLoop(state, LOOP_SEED).run(loopIterations, LOOP_TIME_BUDGET_MS);
+    CompressionLoop loop = new CompressionLoop(state, LOOP_SEED);
+    loop.setCancelMonitor(cancelMonitor);
+    loop.run(loopIterations, LOOP_TIME_BUDGET_MS);
 
     List<Placement> placements = state.getPlacements();
     RoutingResult routing = state.getRouting();

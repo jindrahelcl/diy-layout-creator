@@ -310,6 +310,35 @@ public class CompressionState {
     }
   }
 
+  /** A full copy of the optimizable state, for global-best tracking across worse moves. */
+  public record Snapshot(Map<IDIYComponent<?>, Placement> placements,
+      GridModel.WireSnapshot wires, List<RoutedNet> nets) {
+  }
+
+  public Snapshot snapshot() {
+    return new Snapshot(new IdentityHashMap<IDIYComponent<?>, Placement>(placements),
+        grid.snapshotWires(), new ArrayList<RoutedNet>(routing.getNets()));
+  }
+
+  /** Restores a snapshot: placements, wires, routing, pin-net tags. Clears the undo slot. */
+  public void restore(Snapshot snapshot) {
+    for (IDIYComponent<?> component : componentOrder) {
+      Placement target = snapshot.placements().get(component);
+      if (!target.equals(placements.get(component))) {
+        applyPlacement(target);
+      }
+    }
+    grid.restoreWires(snapshot.wires());
+    routing.getNets().clear();
+    routing.getNets().addAll(snapshot.nets());
+    Set<Integer> allNets = new HashSet<Integer>();
+    for (int netId = 0; netId < netPins.size(); netId++) {
+      allNets.add(netId);
+    }
+    retagPins(allNets);
+    undo = null;
+  }
+
   /** Routes every net from scratch; existing wire claims are dropped first. */
   public void rerouteAll() {
     for (int netId = 0; netId < netPins.size(); netId++) {

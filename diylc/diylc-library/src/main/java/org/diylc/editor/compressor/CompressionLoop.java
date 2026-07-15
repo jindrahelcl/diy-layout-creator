@@ -24,25 +24,34 @@ package org.diylc.editor.compressor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.function.BooleanSupplier;
 
 import org.diylc.editor.compressor.GridModel.Cell;
 import org.diylc.editor.compressor.PlacementSeeder.Placement;
 
 /**
- * Iterative layout improvement on a routed {@link CompressionState}: random small moves
- * (slide, rotate, stretch a lead span, re-route a net, un-jump a jumpered net), each applied
- * incrementally and kept only when it strictly lowers the cost — plain greedy descent for now;
- * simulated annealing replaces the acceptance rule in a later step. Deterministic for a given
- * seed and iteration count.
+ * Simulated annealing on a routed {@link CompressionState}: random small moves (slide, rotate,
+ * stretch a lead span, re-route a net, un-jump a jumpered net), applied incrementally. Better
+ * states are always kept; worse ones with probability exp(-delta/T) under a geometric cooling
+ * schedule driven by iteration progress, so a seed and iteration count give a deterministic
+ * result. The global best state is tracked and restored at the end — the loop is
+ * anytime-stoppable via the wall-clock budget or the cancel monitor without losing progress.
  *
  * @author Layout Compressor contributors
  */
 public class CompressionLoop {
 
+  /** Starting temperature as a fraction of the initial cost. */
+  public static final double START_TEMPERATURE_FACTOR = 0.05;
+
+  /** Temperature at the end of the schedule; effectively greedy. */
+  public static final double END_TEMPERATURE = 0.5;
+
   private static final int[][] SLIDE_DELTAS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
   private final CompressionState state;
   private final Random random;
+  private BooleanSupplier cancelled = () -> false;
 
   /** The state must be fully routed (see {@link CompressionState#rerouteAll()}). */
   public CompressionLoop(CompressionState state, long seed) {
@@ -50,27 +59,49 @@ public class CompressionLoop {
     this.random = new Random(seed);
   }
 
-  /** Attempts the given number of random moves, keeping improvements; returns the final cost. */
+  /** Polled every iteration; when true the loop stops and keeps the best state so far. */
+  public void setCancelMonitor(BooleanSupplier cancelled) {
+    this.cancelled = cancelled;
+  }
+
+  /** Attempts the given number of random moves; returns the (global best) final cost. */
   public long run(int iterations) {
-    return run(iterations, Integer.MAX_VALUE);
+    return run(iterations, Long.MAX_VALUE);
   }
 
   /** Like {@link #run(int)} but also stops once the wall-clock budget is spent. */
   public long run(int iterations, long timeBudgetMs) {
-    long deadline = System.currentTimeMillis() + timeBudgetMs;
+    long now = System.currentTimeMillis();
+    long deadline = timeBudgetMs > Long.MAX_VALUE - now ? Long.MAX_VALUE : now + timeBudgetMs;
     long current = state.cost();
-    for (int i = 0; i < iterations && System.currentTimeMillis() < deadline; i++) {
+    long best = current;
+    CompressionState.Snapshot bestSnapshot = state.snapshot();
+    double startTemperature = Math.max(1, current * START_TEMPERATURE_FACTOR);
+    for (int i = 0; i < iterations; i++) {
+      if (cancelled.getAsBoolean() || System.currentTimeMillis() >= deadline) {
+        break;
+      }
+      double temperature = startTemperature
+          * Math.pow(END_TEMPERATURE / startTemperature, i / (double) iterations);
       Long candidate = propose();
       if (candidate == null) {
         continue;
       }
-      if (candidate < current) {
+      if (candidate <= current
+          || random.nextDouble() < Math.exp((current - candidate) / temperature)) {
         current = candidate;
+        if (current < best) {
+          best = current;
+          bestSnapshot = state.snapshot();
+        }
       } else {
         state.undoMove();
       }
     }
-    return current;
+    if (current > best) {
+      state.restore(bestSnapshot);
+    }
+    return best;
   }
 
   /** One random move attempt; null when it was infeasible (the state is then unchanged). */
