@@ -210,6 +210,16 @@ public class CompressionState {
         affected.add(displaced);
       }
     }
+    // jumper ends the moved body now covers must re-escape (a wire can run under a body,
+    // a top-side jumper end cannot); pin-covered ends are already caught as wire holes
+    List<Rectangle> bodyRects = candidate.bodyCells();
+    for (RoutedNet net : routing.getNets()) {
+      for (RoutedNet.Jumper jumper : net.getJumpers()) {
+        if (coversCell(bodyRects, jumper.from()) || coversCell(bodyRects, jumper.to())) {
+          affected.add(net.getNetId());
+        }
+      }
+    }
     rerouteNets(affected);
     undo = pending;
     return cost();
@@ -278,6 +288,16 @@ public class CompressionState {
 
   private boolean cellClear(Cell cell) {
     return grid.pinsAt(cell).isEmpty() && grid.bodiesAt(cell).isEmpty();
+  }
+
+  private static boolean coversCell(List<Rectangle> rects, Cell cell) {
+    for (Rectangle rect : rects) {
+      if (cell.col() >= rect.x && cell.col() <= rect.x + rect.width && cell.row() >= rect.y
+          && cell.row() <= rect.y + rect.height) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Restores the pin-net tags of the nets' pins after their cells were vacated. */

@@ -358,7 +358,10 @@ public class Router {
   }
 
   /** How far a jumper end may move from the cell it connects, in Chebyshev cells. */
-  private static final int MAX_ESCAPE_RADIUS = 2;
+  private static final int MAX_ESCAPE_RADIUS = 3;
+
+  /** Individual A* probes toward preferred escape holes before the any-hole fallback. */
+  private static final int MAX_ESCAPE_PROBES = 6;
 
   /**
    * A hole where a jumper end for this net may physically sit. If the cell itself is free
@@ -397,18 +400,34 @@ public class Router {
     candidates.sort(Comparator.comparingInt((Cell c) -> manhattan(c, otherEnd))
         .thenComparing(OPEN_CELL_ORDER));
 
-    for (Cell candidate : candidates) {
-      List<Cell> stub = findPath(netId, cell, Set.of(candidate));
-      if (stub != null && stub.size() > 1) {
-        net.getRuns().add(stub);
-        grid.claimRun(netId, stub);
-        connected.addAll(stub);
-        usedJumperHoles.add(candidate);
-        return candidate;
+    for (int i = 0; i < Math.min(candidates.size(), MAX_ESCAPE_PROBES); i++) {
+      if (claimStub(net, cell, Set.of(candidates.get(i)), usedJumperHoles, connected)) {
+        return net.getRuns().get(net.getRuns().size() - 1)
+            .get(net.getRuns().get(net.getRuns().size() - 1).size() - 1);
       }
+    }
+    // no preferred hole reachable: any eligible hole beats squatting in the pin's own hole
+    if (!candidates.isEmpty()
+        && claimStub(net, cell, new HashSet<Cell>(candidates), usedJumperHoles, connected)) {
+      List<Cell> stub = net.getRuns().get(net.getRuns().size() - 1);
+      return stub.get(stub.size() - 1);
     }
     usedJumperHoles.add(cell);
     return cell;
+  }
+
+  /** Routes and claims an escape stub from the cell to any of the target holes. */
+  private boolean claimStub(RoutedNet net, Cell cell, Set<Cell> targets,
+      Set<Cell> usedJumperHoles, Set<Cell> connected) {
+    List<Cell> stub = findPath(net.getNetId(), cell, targets);
+    if (stub == null || stub.size() < 2) {
+      return false;
+    }
+    net.getRuns().add(stub);
+    grid.claimRun(net.getNetId(), stub);
+    connected.addAll(stub);
+    usedJumperHoles.add(stub.get(stub.size() - 1));
+    return true;
   }
 
   private static int halfPerimeter(List<Cell> pins) {
