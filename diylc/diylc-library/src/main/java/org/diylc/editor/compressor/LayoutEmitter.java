@@ -44,8 +44,8 @@ import org.diylc.presenter.ComponentProcessor;
  * Turns the compressed state back into DIYLC components: moves placed parts onto their lattice
  * cells (rotating through the component's transformer so orientation properties stay in sync),
  * realizes underside runs as {@link CopperTrace}s and top-side jumpers as solid red
- * {@link Jumper}s, and shrink-wraps a {@link PerfBoard} around the result, board first in
- * z-order.
+ * {@link Jumper}s, and shrink-wraps a {@link PerfBoard} around the result. Z-order places the
+ * board lowest, then traces, then the placed parts, with jumpers on top of everything.
  *
  * @author Layout Compressor contributors
  */
@@ -76,7 +76,8 @@ public class LayoutEmitter {
       names.add(component.getName());
     }
 
-    List<IDIYComponent<?>> wires = new ArrayList<IDIYComponent<?>>();
+    List<IDIYComponent<?>> traces = new ArrayList<IDIYComponent<?>>();
+    List<IDIYComponent<?>> jumpers = new ArrayList<IDIYComponent<?>>();
     if (routing != null) {
       for (RoutedNet net : routing.getNets()) {
         Set<Cell> connectionCells = new HashSet<Cell>(pinCells);
@@ -90,17 +91,23 @@ public class LayoutEmitter {
         }
         for (List<Cell> run : net.getRuns()) {
           for (int[] segment : segments(run, connectionCells)) {
-            wires.add(trace(GridModel.toPixels(run.get(segment[0])),
+            traces.add(trace(GridModel.toPixels(run.get(segment[0])),
                 GridModel.toPixels(run.get(segment[1])), nextName(names, "Trace")));
           }
         }
         for (RoutedNet.Jumper jumper : net.getJumpers()) {
-          wires.add(wire(GridModel.toPixels(jumper.from()), GridModel.toPixels(jumper.to()),
+          jumpers.add(wire(GridModel.toPixels(jumper.from()), GridModel.toPixels(jumper.to()),
               nextName(names)));
         }
       }
     }
-    project.getComponents().addAll(wires);
+    // traces sit under everything (underside copper); jumpers sit over everything (top-side
+    // flying leads), so each goes to its own end of the z-order list rather than being appended
+    // together.
+    project.getComponents().addAll(0, traces);
+    project.getComponents().addAll(jumpers);
+    List<IDIYComponent<?>> wires = new ArrayList<IDIYComponent<?>>(traces);
+    wires.addAll(jumpers);
 
     PerfBoard board = null;
     if (boardCells != null) {
