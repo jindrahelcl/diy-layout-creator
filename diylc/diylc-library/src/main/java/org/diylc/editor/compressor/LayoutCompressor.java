@@ -98,7 +98,6 @@ public class LayoutCompressor implements IProjectEditor {
   // set by prepare(); edit() commits them to the real project
   private Project preparedFor;
   private Project scratch;
-  private Set<IDIYComponent<?>> emitted;
 
   public LayoutCompressor(List<ContinuityArea> continuityAreas,
       Function<IDIYComponent<?>, Rectangle2D> bodyBoundsProvider) {
@@ -216,7 +215,7 @@ public class LayoutCompressor implements IProjectEditor {
     project.getLockedComponents().addAll(scratch.getLockedComponents());
     project.getGroupsEx().clear();
     project.getGroupsEx().addAll(scratch.getGroupsEx());
-    return emitted;
+    return Set.of();
   }
 
   /**
@@ -350,10 +349,6 @@ public class LayoutCompressor implements IProjectEditor {
     // nearest board pin of its net (pins always carry wire endpoints, mid-run cells may not),
     // or pin to pin when the whole net is remote
     int flyingWires = 0;
-    emitted = new HashSet<IDIYComponent<?>>(emission.wires());
-    if (emission.board() != null) {
-      emitted.add(emission.board());
-    }
     for (int netId = 0; netId < nets.size(); netId++) {
       Point2D previousRemote = null;
       for (Node node : nets.get(netId).getSortedNodes()) {
@@ -364,10 +359,10 @@ public class LayoutCompressor implements IProjectEditor {
         Point2D pin = clone.getControlPoint(node.getPointIndex());
         Cell target = nearestCell(pin, netCells.get(netId));
         if (target != null) {
-          emitted.add(emitter.emitFlyingWire(scratch, pin, GridModel.toPixels(target)));
+          emitter.emitFlyingWire(scratch, pin, GridModel.toPixels(target));
           flyingWires++;
         } else if (previousRemote != null) {
-          emitted.add(emitter.emitFlyingWire(scratch, pin, previousRemote));
+          emitter.emitFlyingWire(scratch, pin, previousRemote);
           flyingWires++;
         }
         previousRemote = pin;

@@ -108,7 +108,7 @@ public class LayoutCompressorTests {
 
     LayoutCompressor compressor =
         new LayoutCompressor(new ArrayList<ContinuityArea>(), null);
-    Set<IDIYComponent<?>> emitted = compressor.edit(project, Set.of());
+    Set<IDIYComponent<?>> newSelection = compressor.edit(project, Set.of());
 
     // board first, old connector gone, new wires present
     assertTrue(project.getComponents().get(0) instanceof PerfBoard);
@@ -123,7 +123,8 @@ public class LayoutCompressorTests {
       }
     }
     assertTrue(connected(project, newR1, 1, newR2, 0));
-    assertTrue(emitted.size() > 0);
+    // nothing is left selected after the edit
+    assertTrue(newSelection.isEmpty());
 
     LayoutCompressor.Stats stats = compressor.getStats();
     assertEquals(2, stats.movedParts());
