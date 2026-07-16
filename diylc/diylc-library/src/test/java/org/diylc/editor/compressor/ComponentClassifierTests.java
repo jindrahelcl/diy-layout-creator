@@ -35,6 +35,7 @@ import org.diylc.components.electromechanical.MiniToggleSwitch;
 import org.diylc.components.misc.Label;
 import org.diylc.components.passive.Resistor;
 import org.diylc.components.semiconductors.DIL_IC;
+import org.diylc.components.shapes.TapeMeasure;
 import org.diylc.core.Project;
 import org.junit.Test;
 
@@ -76,5 +77,18 @@ public class ComponentClassifierTests {
     assertTrue(classification.getRealParts().contains(terminalBlock));
     assertTrue(classification.getRealParts().contains(turret));
     assertEquals(0, classification.getConnectivity().size());
+  }
+
+  @Test
+  public void tapeMeasureIsADecorationDespiteItsStickyEndpoints() {
+    Project project = new Project();
+    TapeMeasure tapeMeasure = new TapeMeasure();
+    project.getComponents().add(tapeMeasure);
+
+    ComponentClassifier.Classification classification =
+        new ComponentClassifier().classify(project);
+
+    assertTrue(classification.getDecorations().contains(tapeMeasure));
+    assertEquals(0, classification.getRealParts().size());
   }
 }

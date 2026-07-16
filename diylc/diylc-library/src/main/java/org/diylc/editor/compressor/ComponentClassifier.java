@@ -36,6 +36,7 @@ import org.diylc.components.connectivity.Line;
 import org.diylc.components.connectivity.MultimeterProbe;
 import org.diylc.components.connectivity.SolderPad;
 import org.diylc.components.connectivity.TraceCut;
+import org.diylc.components.shapes.TapeMeasure;
 import org.diylc.core.IBoard;
 import org.diylc.core.IContinuity;
 import org.diylc.core.IDIYComponent;
@@ -59,6 +60,12 @@ public class ComponentClassifier {
       Arrays.asList(CopperTrace.class, CurvedTrace.class, GroundFill.class, SolderPad.class,
           Dot.class, Line.class, TraceCut.class, CutLine.class, MultimeterProbe.class));
 
+  // drawing aids whose base class gives them sticky points even though they play no
+  // electrical role (TapeMeasure extends AbstractLeadedComponent, so its endpoints look
+  // like pins and would otherwise become netlist nodes)
+  private static final Set<Class<?>> DECORATION_CLASSES =
+      new HashSet<Class<?>>(Arrays.asList(TapeMeasure.class));
+
   public Classification classify(Project project) {
     Classification result = new Classification();
     for (IDIYComponent<?> c : project.getComponents()) {
@@ -66,7 +73,7 @@ public class ComponentClassifier {
         result.boards.add(c);
       } else if (isConnectivityOnly(c)) {
         result.connectivity.add(c);
-      } else if (hasNoStickyPoints(c)) {
+      } else if (hasNoStickyPoints(c) || DECORATION_CLASSES.contains(c.getClass())) {
         result.decorations.add(c);
       } else {
         result.realParts.add(c);
