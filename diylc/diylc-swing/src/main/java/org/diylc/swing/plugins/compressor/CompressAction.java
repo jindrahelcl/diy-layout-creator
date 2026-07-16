@@ -80,9 +80,16 @@ public class CompressAction extends AbstractAction {
     compressor.setCancelMonitor(dialog::isFinishRequested);
     compressor.setAbortMonitor(dialog::isAborted);
     compressor.setProgressListener(dialog::reportProgress);
-    dialog.showProgress();
+    dialog.showParams(() -> {
+      compressor.setLoopTimeBudget(dialog.getTimeBudgetMs());
+      compressor.setBoardMargin(dialog.getBoardMargin());
+      dialog.showProgress();
+      runCompression(compressor, dialog);
+    }, () -> {});
     dialog.setVisible(true);
+  }
 
+  private void runCompression(LayoutCompressor compressor, CompressDialog dialog) {
     swingUI.executeBackgroundTask(new ITask<Void>() {
 
       @Override
