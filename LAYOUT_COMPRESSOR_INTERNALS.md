@@ -4,7 +4,7 @@ Developer reference for the `layout-compressor` branch, written so a new contrib
 session) can work on the code without re-deriving it from source. Companion documents:
 `LAYOUT_COMPRESSOR_DESIGN.md` (the plan and milestones — source of truth for *what* gets built)
 and the session handoff artifact (current status and open bugs). This file describes *how the
-code works* as of M4a plus the body-overlap fix.
+code works* as of M5 (options dialog + corpus sweep fixes).
 
 ## The one-paragraph mental model
 
@@ -39,17 +39,16 @@ Engine (all logic, no UI) — `diylc/diylc-library/src/main/java/org/diylc/edito
 
 UI — `diylc/diylc-swing/src/main/java/org/diylc/swing/plugins/compressor/`: menu plugin +
 `CompressAction` ("Edit → Compress Layout"), which runs `LayoutCompressor.prepare(...)` in a
-background task behind `CompressDialog` — one `JDialog` that cycles through content-pane
-states (`showParams`: time budget/margin spinners, feeding `LayoutCompressor.setLoopTimeBudget`/
-`setBoardMargin`, both now real setters instead of hardcoded constants — but `CompressAction`
-doesn't call `showParams` yet, it still jumps straight to `showProgress` with default values;
-`showProgress`: phase label + progress bar, **Finish Now** stops the loop keeping the best
-state, **Cancel**/close aborts via the abort monitor — `CancelledException`, project untouched;
-a report state to replace the plain stats popup is still to come), then commits via
-`plugInPort.applyEditor(...)` on the EDT and shows a stats summary. Registered with 2 lines in
-`MainFrame.java`. The only other upstream touches:
-~11 lines in `NetlistBuilder.java` and the public `getBodyShapeBounds()` accessor on
-`AbstractLeadedComponent` (body geometry for footprints).
+background task behind `CompressDialog` — one `JDialog` that flows through three content-pane
+states: `showParams` (time budget/margin spinners feeding `LayoutCompressor.setLoopTimeBudget`/
+`setBoardMargin`; Compress starts the run, Cancel/close backs out), `showProgress` (phase label
++ progress bar; **Finish Now** stops the loop keeping the best state, **Cancel**/close aborts
+via the abort monitor — `CancelledException`, project untouched), and `showReport` (result
+summary in the same window, replacing the old `showMessage` popup; it reads the margin actually
+used from `Stats.boardMargin()`). The verified result commits via `plugInPort.applyEditor(...)`
+on the EDT before the report shows. Registered with 2 lines in `MainFrame.java`. The only other
+upstream touches: ~11 lines in `NetlistBuilder.java` and the public `getBodyShapeBounds()`
+accessor on `AbstractLeadedComponent` (body geometry for footprints).
 
 Tests: `diylc-library` test tree mirrors the engine classes one-to-one;
 `CompressorSmokeTest` lives in the diylc-swing test tree (needs a display).
@@ -99,6 +98,15 @@ Built by `Footprint.of(component, bodyBoundsPx)`:
 - **Stretchable** = `instanceof AbstractLeadedComponent` with exactly 2 sticky pins (resistors,
   diodes, caps, inductors…). Their span is a placement variable, not a footprint constant.
 - **Rotatable** = stretchable, or the component type's `IComponentTransformer.canRotate` says so.
+- **Rotation variants are probed, not computed.** For fixed rotatable parts, `Footprint.of`
+  clones the component and rotates the clone with its type's transformer one quarter turn at a
+  time (exactly what `LayoutEmitter` does), recording the sticky-pin offsets per turn.
+  Transformers are *not* pure rotations: flipped symbols (`Abstract3LegSymbol` + `flip`)
+  recompute their points as flip-after-rotate, which lands pins elsewhere than `Cell(-row,col)`
+  math predicts — routing against the math while emitting via the transformer merged nets on
+  every schematic corpus file with flipped pots. If a probed variant leaves the lattice, the
+  part is treated as non-rotatable. `rotatedOffsets` serves probed variants when present; the
+  pure-math path remains for stretchable parts.
 - **Body extents** — two representations:
   - *Stretchable parts*: `bodyLengthCells` × `bodyWidthCells` (fractional cells) taken from
     `AbstractLeadedComponent.getBodyShapeBounds()` — the exact body rectangle the renderer
@@ -283,9 +291,12 @@ as if only some components moved in. Two move kinds per sweep, over all four edg
   different rules on the two sides would let a lost terminal-block connection pass the gate.
 - `ComponentClassifier`: boards = `IBoard`; connectivity-only = `IContinuity` non-switch plus an
   explicit drawn-copper list (CopperTrace, CurvedTrace, GroundFill, SolderPad, Dot, Line,
-  TraceCut, CutLine, MultimeterProbe); no-sticky-points = decorations; the rest are real parts.
-  Terminal blocks, turrets, eyelets, solder lugs are deliberately **real parts** — they're
-  physical hardware to place, not regenerable wiring.
+  TraceCut, CutLine, MultimeterProbe); no-sticky-points = decorations, plus an explicit
+  decoration list for drawing aids whose base class gives them sticky points (`TapeMeasure`
+  extends `AbstractLeadedComponent` — without the list its endpoints become netlist nodes and a
+  locked tape measure fails the gate when a trace routes under an endpoint); the rest are real
+  parts. Terminal blocks, turrets, eyelets, solder lugs are deliberately **real parts** —
+  they're physical hardware to place, not regenerable wiring.
 
 ## Sharp edges (read before touching anything)
 
@@ -311,6 +322,9 @@ as if only some components moved in. Two move kinds per sweep, over all four edg
 8. **`Router.rerouteNets` may change nets outside the requested subset** (rip-up); undo relies
    on the full wire snapshot, not on re-routing back.
 9. **`mvn -pl diylc-library` needs `-am`** — the parent/core poms aren't in the local repo.
+10. **Transformer rotation is not pure rotation.** Flipped symbols recompute pins as
+    flip-after-rotate on `setOrientation`. Never predict a fixed part's rotated pins with
+    `Cell(-row,col)` math — use the footprint's probed variants (`Footprint.rotatedOffsets`).
 
 ## Build, test, run
 
@@ -355,21 +369,36 @@ a deterministic post-annealing squeeze pass (pull + atomic edge-peel) that close
 annealing alone leaves on boards where several parts share an edge — corpus: aaa 21×25→20×25,
 LM386 23×25→20×25, Rix Pro Jr 60×34→60×33, Synth jumpers 79→72.
 
-**In progress: M5 options dialog.** Goal: let the user set time budget and board margin before
-compressing, in one dialog that flows params → progress → report (replacing the separate stats
-popup). Done so far: `LayoutCompressor.setLoopTimeBudget`/`setBoardMargin` (engine-side, real
-setters instead of hardcoded constants — `Stats` now also reports the margin actually used);
-`CompressProgressDialog` renamed to `CompressDialog` and restructured around explicit
-content-pane states (`showParams`, `showProgress`). Not done yet: the report state (`showReport`,
-to replace `CompressAction.showStats`'s `swingUI.showMessage` popup); wiring `CompressAction` to
-actually call `showParams` first instead of jumping straight to `showProgress` with defaults —
-until that lands, the params screen exists but is dead code, not reachable from the menu. Wire
-colors/styles were deliberately dropped from scope (traces/jumpers are ordinary components,
-restylable after the fact via the normal property panel — a dedicated option would just
-duplicate existing UI). Not manually smoke-tested in the GUI yet.
+**M5 options dialog: done** (2026-07-16, not yet GUI-smoke-tested). `CompressDialog` flows
+params → progress → report in one window; `CompressAction` opens on the params screen and only
+starts the run on "Compress". Wire colors/styles were deliberately dropped from scope
+(traces/jumpers are ordinary components, restylable after the fact via the normal property
+panel — a dedicated option would just duplicate existing UI).
 
-Next after that: §4.5 special-case hardening, corpus-wide graceful degradation sweep (all 34
-`.diy` files, not just the 4 spot-checked so far), **#19** initial placement quality (edge
+**Corpus sweep: done** (2026-07-16, headless CompressTool over all 34 regression files).
+First pass: 20 ok / 13 gate-failures / 1 graceful no-op. Two root causes found and fixed:
+
+- **Flipped-symbol rotation** — transformers recompute pins as flip-after-rotate; the
+  compressor's pure-rotation prediction disagreed with emitted geometry, so traces landed on
+  actual pin positions of foreign nets. Fixed by probing rotations via the transformer on a
+  clone (see Footprint section; sharp edge 10). Cleared AllTube Schem, BrownfaceReverb,
+  Lectrolab, ProTremoVerb, RR2104.
+- **TapeMeasure classified as a real part** — see classifier section. Cleared part of
+  dist_layout's diff.
+
+Second pass: **25 ok / 8 gate-failures / 1 graceful no-op**. All 8 remaining failures are one
+class: **drawn copper wider than the model** — remote off-grid parts (tube sockets) left at
+original coordinates that the emitted board now overlaps, and placed parts with long drawn
+metal (open-jack lugs) whose copper reaches holes several cells away; `padRadii` models copper
+only as ≤1.5-cell circles around pins. The gate catches every one (project untouched, diff
+shown), so degradation is graceful — but making these pass needs copper-aware obstacles:
+block/avoid holes intersecting each part's actual continuity-positive areas (exact for remote
+parts, which never move; needs translate+rotate for placed parts), or alternatively shift the
+emitted board clear of all remote parts' drawn bounds. Undecided — next session's design call.
+Also noted: LargeBandMaster takes 377 s (routing/rip-up churn on a huge point-to-point layout,
+not the 5 s loop) — the pipeline needs an overall budget or rip-up caps eventually.
+
+Next: the copper-aware obstacle decision above, then **#19** initial placement quality (edge
 terminals, bypass caps near power pins — `compact()` above covers part of this already),
 optional standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`;
 the fork is `origin` on the home Windows machine and `fork` on the office Linux machine —
