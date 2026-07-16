@@ -4,7 +4,7 @@ Developer reference for the `layout-compressor` branch, written so a new contrib
 session) can work on the code without re-deriving it from source. Companion documents:
 `LAYOUT_COMPRESSOR_DESIGN.md` (the plan and milestones — source of truth for *what* gets built)
 and the session handoff artifact (current status and open bugs). This file describes *how the
-code works* as of M5 (options dialog + corpus sweep fixes).
+code works* as of #19 (placement quality), with M0–M5 complete.
 
 ## The one-paragraph mental model
 
