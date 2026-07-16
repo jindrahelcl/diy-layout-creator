@@ -2446,6 +2446,10 @@ public class Presenter implements IPlugInPort {
       LOG.error("Could not apply editor", e);
       view.showMessage("Could not apply " + editor.getEditAction() + ". Check the log for details.", ERROR, IView.ERROR_MESSAGE);
     } finally {
+      // editors may remove components wholesale; their entries would otherwise linger in the
+      // area map and keep feeding phantom copper into the continuity graph
+      drawingManager.clearComponentAreaMap();
+      DrawingCache.Instance.clear();
       notifyProjectModifiedIfNeeded(oldProject, editor.getEditAction(), true, true);
       drawingManager.fireZoomChanged();
     }
