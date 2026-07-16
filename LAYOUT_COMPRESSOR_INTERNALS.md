@@ -391,14 +391,16 @@ class: **drawn copper wider than the model** — remote off-grid parts (tube soc
 original coordinates that the emitted board now overlaps, and placed parts with long drawn
 metal (open-jack lugs) whose copper reaches holes several cells away; `padRadii` models copper
 only as ≤1.5-cell circles around pins. The gate catches every one (project untouched, diff
-shown), so degradation is graceful — but making these pass needs copper-aware obstacles:
-block/avoid holes intersecting each part's actual continuity-positive areas (exact for remote
-parts, which never move; needs translate+rotate for placed parts), or alternatively shift the
-emitted board clear of all remote parts' drawn bounds. Undecided — next session's design call.
-Also noted: LargeBandMaster takes 377 s (routing/rip-up churn on a huge point-to-point layout,
-not the 5 s loop) — the pipeline needs an overall budget or rip-up caps eventually.
+shown), so degradation is graceful. **Decision (user, 2026-07-16): won't fix** — the failing
+files are schematics and point-to-point tube layouts, outside the perfboard-design use case
+this tool targets; a clean gate rejection with a message is the intended behavior for them.
+(If it's ever revisited: copper-aware obstacles — block holes intersecting each part's actual
+continuity-positive areas, exact for remote parts which never move — or shift the emitted
+board clear of remote parts' drawn bounds.) Also noted: LargeBandMaster takes 377 s
+(routing/rip-up churn on a huge point-to-point layout, not the 5 s loop) — a pipeline-wide
+budget or rip-up cap would bound worst-case runtime on such inputs.
 
-Next: the copper-aware obstacle decision above, then **#19** initial placement quality (edge
+Next: **#19** initial placement quality (edge
 terminals, bypass caps near power pins — `compact()` above covers part of this already),
 optional standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`;
 the fork is `origin` on the home Windows machine and `fork` on the office Linux machine —
