@@ -409,9 +409,24 @@ board clear of remote parts' drawn bounds.) Also noted: LargeBandMaster takes 37
 (routing/rip-up churn on a huge point-to-point layout, not the 5 s loop) — a pipeline-wide
 budget or rip-up cap would bound worst-case runtime on such inputs.
 
-Next: **#19** initial placement quality (edge
-terminals, bypass caps near power pins — `compact()` above covers part of this already),
-optional standing-mount mode, SWAP move if corpus says stuck. Git: branch `layout-compressor`;
+**#19 done** (2026-07-16): two placement-quality levers, both measured on the corpus.
+*Net-aware seeding*: `PlacementSeeder.seed(footprints, nets)` pulls parts toward the centroid
+of their small-net mates (`RELAX_MAX_NET = 4`; bigger nets are rails whose centroid is
+meaningless) over `RELAX_SWEEPS = 2` sequential sweeps at `RELAX_PULL = 0.5`, then re-inflates
+to min(target area, pre-relax extent) — relaxing below seeding density floods the router with
+jumpers. Both the plain and relaxed seeds are legalized and routed (`buildRoutedState`; costs
+milliseconds) and the loop starts from the relaxed one only when its routed cost is >10%
+cheaper (`relaxed*10 < plain*9`) — measured: ~3%-cheaper seeds *ended worse* after annealing.
+Corpus effect: Stack Pointer 45×36→35×30 wire −33%, Rix Bassman wire 512→277, Lectrolab
+58×43→48×43, RR2104 wire −26%/jumpers −8; everything else unchanged within annealing noise.
+*Edge affinity*: `CompressionState.setEdgeParts` + `EDGE_WEIGHT = 5` per cell of pin distance
+from the occupied bounds; flagged in `prepare` for `PCBTerminalBlock`/`SolderLug` (the corpus
+has none — aaa.diy is the benchmark). Deliberately a soft pull: seeding terminals *onto* the
+bbox edge was tried and rejected (+37% wire on aaa.diy — a terminal's net mates are sometimes
+interior), and `EDGE_WEIGHT = 15` bought no extra proximity, only board area.
+
+Next: optional standing-mount mode, SWAP move if corpus says stuck, then M6 upstreaming
+(regression metrics report, screenshots, docs, PR). Git: branch `layout-compressor`;
 the fork is `origin` on the home Windows machine and `fork` on the office Linux machine —
 **never push to bancika's repo** (named `upstream` at home). Commit per substep, brief messages
 (subject + Co-Authored-By only).
