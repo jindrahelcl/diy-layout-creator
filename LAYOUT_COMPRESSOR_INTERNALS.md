@@ -47,8 +47,12 @@ via the abort monitor — `CancelledException`, project untouched), and `showRep
 summary in the same window, replacing the old `showMessage` popup; it reads the margin actually
 used from `Stats.boardMargin()`). The verified result commits via `plugInPort.applyEditor(...)`
 on the EDT before the report shows. Registered with 2 lines in `MainFrame.java`. The only other
-upstream touches: ~11 lines in `NetlistBuilder.java` and the public `getBodyShapeBounds()`
-accessor on `AbstractLeadedComponent` (body geometry for footprints).
+upstream touches: ~11 lines in `NetlistBuilder.java`, the public `getBodyShapeBounds()`
+accessor on `AbstractLeadedComponent` (body geometry for footprints), and 4 lines in
+`Presenter.applyEditor` purging `componentAreaMap` + `DrawingCache` — without them, components
+an editor removes keep their drawn copper in the continuity graph, and alt-click highlights
+the pre-compression wiring as a ghost (the delete path always cleared these; `applyEditor`
+didn't).
 
 Tests: `diylc-library` test tree mirrors the engine classes one-to-one;
 `CompressorSmokeTest` lives in the diylc-swing test tree (needs a display).
@@ -369,11 +373,13 @@ a deterministic post-annealing squeeze pass (pull + atomic edge-peel) that close
 annealing alone leaves on boards where several parts share an edge — corpus: aaa 21×25→20×25,
 LM386 23×25→20×25, Rix Pro Jr 60×34→60×33, Synth jumpers 79→72.
 
-**M5 options dialog: done** (2026-07-16, not yet GUI-smoke-tested). `CompressDialog` flows
+**M5 options dialog: done** (2026-07-16, GUI smoke test in progress). `CompressDialog` flows
 params → progress → report in one window; `CompressAction` opens on the params screen and only
-starts the run on "Compress". Wire colors/styles were deliberately dropped from scope
-(traces/jumpers are ordinary components, restylable after the fact via the normal property
-panel — a dedicated option would just duplicate existing UI).
+starts the run on "Compress". The board-margin option was built and then dropped after user
+testing (the board is trivially resizable after the fact); the emitter keeps the 1-cell
+default. Wire colors/styles were deliberately dropped from scope for the same reason. GUI
+testing also caught the ghost-highlight bug fixed in `Presenter.applyEditor` (see the upstream
+touches note in "Where things live").
 
 **Corpus sweep: done** (2026-07-16, headless CompressTool over all 34 regression files).
 First pass: 20 ok / 13 gate-failures / 1 graceful no-op. Two root causes found and fixed:
