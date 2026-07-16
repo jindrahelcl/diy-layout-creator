@@ -23,6 +23,7 @@ package org.diylc.editor.compressor;
 
 import java.awt.Rectangle;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -61,6 +62,9 @@ public class CompressionState {
   /** Cost per unit of underside wire length. */
   public static final int LENGTH_WEIGHT = 1;
 
+  /** Cost per cell an edge part (external wiring anchor) sits away from the board edge. */
+  public static final int EDGE_WEIGHT = 5;
+
   /** A net terminal that stays valid when its component moves. */
   public record PinRef(IDIYComponent<?> component, int pinIndex) {
   }
@@ -74,6 +78,8 @@ public class CompressionState {
   private final Map<IDIYComponent<?>, Map<Integer, Cell>> fixedPins;
   private final Map<IDIYComponent<?>, Set<Integer>> netsOf =
       new IdentityHashMap<IDIYComponent<?>, Set<Integer>>();
+  private final Set<IDIYComponent<?>> edgeParts =
+      Collections.newSetFromMap(new IdentityHashMap<IDIYComponent<?>, Boolean>());
   private RoutingResult routing;
   private Undo undo;
 
@@ -105,6 +111,15 @@ public class CompressionState {
         netsOf.computeIfAbsent(pin.component(), (c) -> new HashSet<Integer>()).add(netId);
       }
     }
+  }
+
+  /**
+   * Marks components whose pins want to sit at the board edge — external wiring anchors like
+   * terminal blocks; their distance to the nearest edge costs {@link #EDGE_WEIGHT} per cell.
+   */
+  public void setEdgeParts(Collection<IDIYComponent<?>> parts) {
+    edgeParts.clear();
+    edgeParts.addAll(parts);
   }
 
   public GridModel getGrid() {
@@ -353,22 +368,37 @@ public class CompressionState {
    * Score of the current, routed state: occupied bounding-box extent (columns + rows) weighted
    * by {@link #AREA_WEIGHT}, jumpers by {@link #JUMPER_WEIGHT}, jumper crossings by
    * {@link #CROSSING_WEIGHT}, span deviations from natural by {@link #SPAN_WEIGHT}, wire
-   * length by {@link #LENGTH_WEIGHT}. Lower is better.
+   * length by {@link #LENGTH_WEIGHT}, edge parts' distance from the board edge by
+   * {@link #EDGE_WEIGHT}. Lower is better.
    */
   public long cost() {
     Rectangle bounds = grid.occupiedBounds();
     long extent = bounds == null ? 0 : (bounds.width + 1) + (bounds.height + 1);
     long spanDeviation = 0;
+    long edgeDistance = 0;
     for (IDIYComponent<?> component : componentOrder) {
       Placement placement = placements.get(component);
       int natural = placement.footprint().getNaturalSpanCells();
       if (placement.footprint().isStretchable() && natural > 0) {
         spanDeviation += Math.abs(placement.span() - natural);
       }
+      if (bounds != null && edgeParts.contains(component)) {
+        int nearest = Integer.MAX_VALUE;
+        for (Cell pin : placement.pinCells()) {
+          int d = Math.min(
+              Math.min(pin.col() - bounds.x, bounds.x + bounds.width - pin.col()),
+              Math.min(pin.row() - bounds.y, bounds.y + bounds.height - pin.row()));
+          nearest = Math.min(nearest, Math.max(0, d));
+        }
+        if (nearest != Integer.MAX_VALUE) {
+          edgeDistance += nearest;
+        }
+      }
     }
     return AREA_WEIGHT * extent + JUMPER_WEIGHT * (long) routing.getJumperCount()
         + CROSSING_WEIGHT * (long) routing.getJumperCrossings()
         + SPAN_WEIGHT * spanDeviation
-        + LENGTH_WEIGHT * (long) routing.getTotalWireLength();
+        + LENGTH_WEIGHT * (long) routing.getTotalWireLength()
+        + EDGE_WEIGHT * edgeDistance;
   }
 }

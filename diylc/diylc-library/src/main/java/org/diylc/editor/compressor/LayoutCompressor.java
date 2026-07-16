@@ -27,6 +27,7 @@ import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -36,6 +37,8 @@ import java.util.Set;
 import java.util.function.Function;
 
 import org.diylc.common.IProjectEditor;
+import org.diylc.components.connectivity.PCBTerminalBlock;
+import org.diylc.components.connectivity.SolderLug;
 import org.diylc.core.IDIYComponent;
 import org.diylc.core.Project;
 import org.diylc.editor.compressor.ComponentClassifier.Classification;
@@ -313,14 +316,25 @@ public class LayoutCompressor implements IProjectEditor {
       netPins.add(pins);
     }
 
+    // external wiring anchors gravitate to the board edge, where the user can reach them
+    Set<IDIYComponent<?>> edgeParts =
+        Collections.newSetFromMap(new IdentityHashMap<IDIYComponent<?>, Boolean>());
+    for (Footprint footprint : movable) {
+      IDIYComponent<?> component = footprint.getComponent();
+      if (component instanceof PCBTerminalBlock || component instanceof SolderLug) {
+        edgeParts.add(component);
+      }
+    }
+
     // legalize and route both seeds — relaxation helps layouts whose nets sprawl and hurts
     // ones the author already arranged well, so let the routed cost pick per project; the
     // improvement loop then runs from the better start (routing costs milliseconds, the loop
     // dominates)
     phase("Routing", 0.10);
-    CompressionState state = buildRoutedState(plainSeed, fixedOnBoard, fixedPinCells, netPins);
+    CompressionState state =
+        buildRoutedState(plainSeed, fixedOnBoard, fixedPinCells, netPins, edgeParts);
     CompressionState relaxedState =
-        buildRoutedState(relaxedSeed, fixedOnBoard, fixedPinCells, netPins);
+        buildRoutedState(relaxedSeed, fixedOnBoard, fixedPinCells, netPins, edgeParts);
     // marginal seed-cost advantages don't predict a better post-loop result (measured on the
     // corpus: ~3% better seeds ended worse after annealing) — only a decisive one does
     if (relaxedState.cost() * 10 < state.cost() * 9) {
@@ -405,7 +419,8 @@ public class LayoutCompressor implements IProjectEditor {
    * parts as obstacles (pins + pad halos), legalized placements, all nets routed.
    */
   private static CompressionState buildRoutedState(Seed seed, List<Footprint> fixedOnBoard,
-      Map<IDIYComponent<?>, Map<Integer, Cell>> fixedPinCells, List<List<PinRef>> netPins) {
+      Map<IDIYComponent<?>, Map<Integer, Cell>> fixedPinCells, List<List<PinRef>> netPins,
+      Set<IDIYComponent<?>> edgeParts) {
     GridModel grid = new GridModel();
     for (Footprint footprint : fixedOnBoard) {
       for (int i = 0; i < footprint.getPinCount(); i++) {
@@ -419,6 +434,7 @@ public class LayoutCompressor implements IProjectEditor {
     Legalizer.Result legalized = new Legalizer().legalize(seed.placements(), grid);
     CompressionState state = new CompressionState(grid, legalized.placements(), fixedPinCells,
         netPins, ROUTING_MARGIN_CELLS);
+    state.setEdgeParts(edgeParts);
     state.rerouteAll();
     return state;
   }

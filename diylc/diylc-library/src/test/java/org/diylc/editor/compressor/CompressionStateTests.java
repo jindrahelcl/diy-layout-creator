@@ -106,6 +106,27 @@ public class CompressionStateTests {
   }
 
   @Test
+  public void edgePartsPayForDistanceFromTheBoardEdge() {
+    // top and bottom resistors span the bounds; the middle one sits one cell in on both axes
+    Placement top = new Placement(Footprint.of(resistorAt(100, 100)), new Cell(0, 0), 0, 4);
+    Placement bottom = new Placement(Footprint.of(resistorAt(100, 300)), new Cell(0, 6), 0, 4);
+    Placement middle = new Placement(Footprint.of(resistorAt(100, 200)), new Cell(1, 3), 0, 2);
+    Legalizer.Result legalized = new Legalizer().legalize(List.of(top, bottom, middle));
+    CompressionState state = new CompressionState(legalized.grid(), legalized.placements(),
+        new HashMap<>(), List.of(), 1);
+    state.rerouteAll();
+    long plain = state.cost();
+
+    state.setEdgeParts(List.of(middle.footprint().getComponent()));
+    assertEquals(plain + CompressionState.EDGE_WEIGHT, state.cost());
+
+    // parts whose pins already touch the bounds cost nothing extra
+    state.setEdgeParts(List.of(top.footprint().getComponent(),
+        bottom.footprint().getComponent()));
+    assertEquals(plain, state.cost());
+  }
+
+  @Test
   public void rerouteAllIsIdempotent() {
     CompressionState state = twoResistorState(resistorAt(100, 100), resistorAt(100, 300));
 
