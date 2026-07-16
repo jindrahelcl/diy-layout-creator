@@ -102,24 +102,24 @@ public class CompressAction extends AbstractAction {
 
       @Override
       public void complete(Void result) {
-        dialog.dispose();
         // quick commit of the already verified result, as a single undoable edit
         plugInPort.applyEditor(compressor);
-        showStats(compressor.getStats());
+        showStats(dialog, compressor.getStats());
       }
     }, true);
   }
 
-  private void showStats(LayoutCompressor.Stats stats) {
+  private void showStats(CompressDialog dialog, LayoutCompressor.Stats stats) {
     if (stats == null) {
       // the presenter already showed its error dialog; nothing was changed
+      dialog.dispose();
       return;
     }
     StringBuilder sb = new StringBuilder();
     if (stats.boardCells() != null) {
-      // occupied extent is inclusive, and the board adds a one-hole margin on each side
-      int holesAcross = stats.boardCells().width + 1 + 2 * LayoutEmitter.BOARD_MARGIN_CELLS;
-      int holesDown = stats.boardCells().height + 1 + 2 * LayoutEmitter.BOARD_MARGIN_CELLS;
+      // occupied extent is inclusive, and the board adds a margin on each side
+      int holesAcross = stats.boardCells().width + 1 + 2 * stats.boardMargin();
+      int holesDown = stats.boardCells().height + 1 + 2 * stats.boardMargin();
       sb.append("Compressed onto a ").append(holesAcross).append(" x ").append(holesDown)
           .append(" hole board.\n");
     }
@@ -137,6 +137,6 @@ public class CompressAction extends AbstractAction {
       sb.append(" (").append(stats.jumperCrossings()).append(" crossing pairs)");
     }
     sb.append(".\n\nUndo restores the original layout.");
-    swingUI.showMessage(sb.toString(), TITLE, ISwingUI.INFORMATION_MESSAGE);
+    dialog.showReport(sb.toString());
   }
 }

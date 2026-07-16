@@ -34,13 +34,14 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JSpinner;
+import javax.swing.JTextArea;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 
 /**
  * One dialog window for the whole "Compress Layout" flow, cycling through content-pane states as
  * the run progresses: parameters ({@link #showParams}, before the run), progress
- * ({@link #showProgress}, during), and eventually a report after completion. On the progress
+ * ({@link #showProgress}, during), and the result summary ({@link #showReport}). On the progress
  * screen, "Finish Now" stops the compacting loop early and keeps the best layout found so far,
  * while "Cancel" (or closing the window) aborts the whole run leaving the project untouched. The
  * abort/finish flags are polled by the compressor from its worker thread; {@link #reportProgress}
@@ -155,6 +156,31 @@ public class CompressDialog extends JDialog {
     setContentPane(content);
     setSize(360, 130);
     setLocationRelativeTo(getOwner());
+  }
+
+  /** Shows the final report screen: result summary text and a "Close" button. */
+  public void showReport(String text) {
+    windowCloseAction = this::dispose;
+
+    JTextArea reportArea = new JTextArea(text);
+    reportArea.setEditable(false);
+    reportArea.setFocusable(false);
+    reportArea.setOpaque(false);
+    reportArea.setFont(phaseLabel.getFont());
+
+    JButton closeButton = new JButton("Close");
+    closeButton.addActionListener((e) -> dispose());
+    JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+    buttons.add(closeButton);
+
+    JPanel content = new JPanel(new BorderLayout(0, 12));
+    content.setBorder(BorderFactory.createEmptyBorder(12, 16, 8, 16));
+    content.add(reportArea, BorderLayout.CENTER);
+    content.add(buttons, BorderLayout.SOUTH);
+    setContentPane(content);
+    pack();
+    setLocationRelativeTo(getOwner());
+    getRootPane().setDefaultButton(closeButton);
   }
 
   /** True once the user asked to stop the loop early, keeping the best result so far. */
