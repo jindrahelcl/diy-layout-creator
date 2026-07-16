@@ -28,7 +28,6 @@ import javax.swing.AbstractAction;
 import org.diylc.common.IPlugInPort;
 import org.diylc.common.ITask;
 import org.diylc.editor.compressor.LayoutCompressor;
-import org.diylc.editor.compressor.LayoutEmitter;
 import org.diylc.presenter.ComponentArea;
 import org.diylc.presenter.ContinuityArea;
 import org.diylc.presenter.DrawingManager;
@@ -75,14 +74,13 @@ public class CompressAction extends AbstractAction {
       return area == null ? null : area.getContinuityPositiveAreas();
     });
 
-    CompressDialog dialog = new CompressDialog(swingUI.getOwnerFrame(),
-        LayoutCompressor.LOOP_TIME_BUDGET_MS, LayoutEmitter.BOARD_MARGIN_CELLS);
+    CompressDialog dialog =
+        new CompressDialog(swingUI.getOwnerFrame(), LayoutCompressor.LOOP_TIME_BUDGET_MS);
     compressor.setCancelMonitor(dialog::isFinishRequested);
     compressor.setAbortMonitor(dialog::isAborted);
     compressor.setProgressListener(dialog::reportProgress);
     dialog.showParams(() -> {
       compressor.setLoopTimeBudget(dialog.getTimeBudgetMs());
-      compressor.setBoardMargin(dialog.getBoardMargin());
       dialog.showProgress();
       runCompression(compressor, dialog);
     }, () -> {});

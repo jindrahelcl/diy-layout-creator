@@ -54,7 +54,6 @@ public class CompressDialog extends JDialog {
   private static final long serialVersionUID = 1L;
 
   private final JSpinner timeBudgetSpinner;
-  private final JSpinner marginSpinner;
   private final JLabel phaseLabel = new JLabel("Starting...");
   private final JProgressBar progressBar = new JProgressBar(0, 100);
   private final JButton finishButton;
@@ -63,7 +62,7 @@ public class CompressDialog extends JDialog {
   private volatile boolean aborted;
   private Runnable windowCloseAction = this::dispose;
 
-  public CompressDialog(Frame owner, long defaultTimeBudgetMs, int defaultMarginCells) {
+  public CompressDialog(Frame owner, long defaultTimeBudgetMs) {
     super(owner, "Layout Compressor", false);
     setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
     addWindowListener(new WindowAdapter() {
@@ -76,7 +75,6 @@ public class CompressDialog extends JDialog {
 
     timeBudgetSpinner = new JSpinner(
         new SpinnerNumberModel((int) Math.max(1, defaultTimeBudgetMs / 1000), 1, 60, 1));
-    marginSpinner = new JSpinner(new SpinnerNumberModel(defaultMarginCells, 0, 5, 1));
 
     finishButton = new JButton("Finish Now");
     finishButton.setToolTipText("Stop optimizing and keep the best layout found so far");
@@ -93,15 +91,10 @@ public class CompressDialog extends JDialog {
     return ((Integer) timeBudgetSpinner.getValue()) * 1000L;
   }
 
-  /** Board margin chosen on the params screen, in cells. */
-  public int getBoardMargin() {
-    return (Integer) marginSpinner.getValue();
-  }
-
   /**
-   * Shows the parameter screen: time budget and board margin spinners. {@code onCompress} runs
-   * when the user clicks "Compress"; {@code onCancel} runs on "Cancel" or the window close box,
-   * after the dialog has already been disposed.
+   * Shows the parameter screen: the time budget spinner. {@code onCompress} runs when the user
+   * clicks "Compress"; {@code onCancel} runs on "Cancel" or the window close box, after the
+   * dialog has already been disposed.
    */
   public void showParams(Runnable onCompress, Runnable onCancel) {
     windowCloseAction = () -> {
@@ -109,11 +102,9 @@ public class CompressDialog extends JDialog {
       onCancel.run();
     };
 
-    JPanel form = new JPanel(new GridLayout(2, 2, 8, 8));
+    JPanel form = new JPanel(new GridLayout(1, 2, 8, 8));
     form.add(new JLabel("Time budget (seconds):"));
     form.add(timeBudgetSpinner);
-    form.add(new JLabel("Board margin (cells):"));
-    form.add(marginSpinner);
 
     JButton compressButton = new JButton("Compress");
     compressButton.addActionListener((e) -> onCompress.run());
@@ -131,7 +122,7 @@ public class CompressDialog extends JDialog {
     content.add(form, BorderLayout.CENTER);
     content.add(buttons, BorderLayout.SOUTH);
     setContentPane(content);
-    setSize(320, 160);
+    setSize(320, 130);
     setLocationRelativeTo(getOwner());
   }
 
