@@ -24,7 +24,9 @@ package org.diylc.editor.compressor;
 import java.awt.Rectangle;
 import java.awt.geom.Point2D;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.diylc.core.IDIYComponent;
 import org.diylc.editor.compressor.GridModel.Cell;
@@ -42,6 +44,18 @@ public class PlacementSeeder {
 
   /** Extra room beyond the sum of footprint areas, to leave space for routing. */
   public static final double AREA_SLACK = 2.0;
+
+  /** Relaxation sweeps pulling parts toward their net mates after scaling. */
+  public static final int RELAX_SWEEPS = 2;
+
+  /** How far toward the net-mate centroid a part moves per sweep (0..1). */
+  public static final double RELAX_PULL = 0.5;
+
+  /**
+   * Nets larger than this don't pull: big nets are power/ground rails whose centroid is just
+   * the middle of the board — only small signal nets carry placement intent.
+   */
+  public static final int RELAX_MAX_NET = 4;
 
   /**
    * One component's spot on the lattice: reference cell (first sticky pin), rotation, and the
@@ -124,6 +138,14 @@ public class PlacementSeeder {
   }
 
   public Seed seed(List<Footprint> footprints) {
+    return seed(footprints, List.of());
+  }
+
+  /**
+   * @param nets components sharing a net, used to pull connected parts together during
+   *        relaxation; members that aren't seeded here (remote, locked) are ignored
+   */
+  public Seed seed(List<Footprint> footprints, List<List<IDIYComponent<?>>> nets) {
     List<Footprint> onGrid = new ArrayList<Footprint>();
     List<IDIYComponent<?>> offGrid = new ArrayList<IDIYComponent<?>>();
     for (Footprint footprint : footprints) {
@@ -160,15 +182,109 @@ public class PlacementSeeder {
     double scale =
         currentAreaPx <= 0 ? 1.0 : Math.min(1.0, Math.sqrt(targetAreaPx / currentAreaPx));
 
+    List<Point2D> scaled = new ArrayList<Point2D>();
+    for (Point2D original : references) {
+      scaled.add(new Point2D.Double(minX + (original.getX() - minX) * scale,
+          minY + (original.getY() - minY) * scale));
+    }
+    relax(onGrid, scaled, nets);
+    reinflate(scaled, Math.min(targetAreaPx,
+        (maxX - minX) * scale * (maxY - minY) * scale));
+
     List<Placement> placements = new ArrayList<Placement>();
     for (int i = 0; i < onGrid.size(); i++) {
       Footprint footprint = onGrid.get(i);
-      Point2D original = references.get(i);
-      Point2D scaled = new Point2D.Double(minX + (original.getX() - minX) * scale,
-          minY + (original.getY() - minY) * scale);
-      placements.add(new Placement(footprint, GridModel.snap(scaled), 0, seedSpan(footprint)));
+      placements
+          .add(new Placement(footprint, GridModel.snap(scaled.get(i)), 0, seedSpan(footprint)));
     }
     return new Seed(placements, offGrid);
+  }
+
+  /**
+   * Pulls each part toward the centroid of its small-net mates, {@link #RELAX_SWEEPS} times.
+   * The scaling above preserves the author's arrangement globally; this tightens it locally so
+   * connected parts (a bypass cap and its IC, a divider pair) start out adjacent instead of
+   * relying on the annealer's one-cell slides to find each other. Updates are sequential in
+   * list order, so the result is deterministic.
+   */
+  private static void relax(List<Footprint> onGrid, List<Point2D> positions,
+      List<List<IDIYComponent<?>>> nets) {
+    Map<IDIYComponent<?>, Integer> indexOf = new IdentityHashMap<IDIYComponent<?>, Integer>();
+    for (int i = 0; i < onGrid.size(); i++) {
+      indexOf.put(onGrid.get(i).getComponent(), i);
+    }
+    List<List<Integer>> neighbors = new ArrayList<List<Integer>>();
+    for (int i = 0; i < onGrid.size(); i++) {
+      neighbors.add(new ArrayList<Integer>());
+    }
+    for (List<IDIYComponent<?>> net : nets) {
+      List<Integer> members = new ArrayList<Integer>();
+      for (IDIYComponent<?> component : net) {
+        Integer index = indexOf.get(component);
+        if (index != null && !members.contains(index)) {
+          members.add(index);
+        }
+      }
+      if (members.size() < 2 || members.size() > RELAX_MAX_NET) {
+        continue;
+      }
+      for (int i : members) {
+        for (int j : members) {
+          if (i != j) {
+            neighbors.get(i).add(j);
+          }
+        }
+      }
+    }
+
+    for (int sweep = 0; sweep < RELAX_SWEEPS; sweep++) {
+      for (int i = 0; i < positions.size(); i++) {
+        List<Integer> mates = neighbors.get(i);
+        if (mates.isEmpty()) {
+          continue;
+        }
+        double cx = 0;
+        double cy = 0;
+        for (int mate : mates) {
+          cx += positions.get(mate).getX();
+          cy += positions.get(mate).getY();
+        }
+        cx /= mates.size();
+        cy /= mates.size();
+        Point2D p = positions.get(i);
+        p.setLocation(p.getX() + RELAX_PULL * (cx - p.getX()),
+            p.getY() + RELAX_PULL * (cy - p.getY()));
+      }
+    }
+  }
+
+  /**
+   * Scales the positions back up after relaxation, to the {@link #AREA_SLACK} target or the
+   * pre-relaxation extent, whichever is smaller. Pulling net mates together shrinks the layout
+   * below the density the scaling aimed for — seeding that dense floods the router with
+   * jumpers the annealer can't recover from — but inflating a layout beyond its pre-relaxation
+   * size is just as bad, since the loop's one-cell slides can't win that area back either.
+   * This keeps the relaxed relative structure at the original seeding density.
+   */
+  private static void reinflate(List<Point2D> positions, double targetAreaPx) {
+    double minX = Double.MAX_VALUE;
+    double minY = Double.MAX_VALUE;
+    double maxX = -Double.MAX_VALUE;
+    double maxY = -Double.MAX_VALUE;
+    for (Point2D p : positions) {
+      minX = Math.min(minX, p.getX());
+      minY = Math.min(minY, p.getY());
+      maxX = Math.max(maxX, p.getX());
+      maxY = Math.max(maxY, p.getY());
+    }
+    double areaPx = (maxX - minX) * (maxY - minY);
+    if (areaPx <= 0) {
+      return;
+    }
+    double scale = Math.max(1.0, Math.sqrt(targetAreaPx / areaPx));
+    for (Point2D p : positions) {
+      p.setLocation(minX + (p.getX() - minX) * scale, minY + (p.getY() - minY) * scale);
+    }
   }
 
   /**

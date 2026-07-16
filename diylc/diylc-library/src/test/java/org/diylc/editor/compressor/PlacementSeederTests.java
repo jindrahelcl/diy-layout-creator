@@ -148,4 +148,52 @@ public class PlacementSeederTests {
     // pins at cells 0 and 5: 6x1 cells
     assertEquals(6, PlacementSeeder.cellArea(resistor));
   }
+
+  @Test
+  public void netMatesRelaxTowardEachOther() {
+    // four parts on a wide row; the two outer ones share a net, the middle two are unconnected
+    Footprint a = Footprint.of(resistorAt(100, 100));
+    Footprint b = Footprint.of(resistorAt(1000, 100));
+    Footprint c = Footprint.of(resistorAt(2000, 100));
+    Footprint d = Footprint.of(resistorAt(3000, 100));
+    List<Footprint> parts = Arrays.asList(a, b, c, d);
+    List<List<org.diylc.core.IDIYComponent<?>>> nets =
+        List.of(List.of(a.getComponent(), d.getComponent()));
+
+    Seed plain = new PlacementSeeder().seed(parts);
+    Seed relaxed = new PlacementSeeder().seed(parts, nets);
+
+    int plainGap = plain.placements().get(3).reference().col()
+        - plain.placements().get(0).reference().col();
+    int relaxedGap = relaxed.placements().get(3).reference().col()
+        - relaxed.placements().get(0).reference().col();
+    assertTrue("net mates should move closer: " + plainGap + " -> " + relaxedGap,
+        relaxedGap < plainGap);
+    // unconnected parts don't move
+    assertEquals(plain.placements().get(1).reference(),
+        relaxed.placements().get(1).reference());
+    assertEquals(plain.placements().get(2).reference(),
+        relaxed.placements().get(2).reference());
+  }
+
+  @Test
+  public void bigNetsDoNotPull() {
+    Footprint a = Footprint.of(resistorAt(100, 100));
+    Footprint b = Footprint.of(resistorAt(1000, 100));
+    Footprint c = Footprint.of(resistorAt(2000, 100));
+    Footprint d = Footprint.of(resistorAt(3000, 100));
+    Footprint e = Footprint.of(resistorAt(4000, 100));
+    List<Footprint> parts = Arrays.asList(a, b, c, d, e);
+    // one net with 5 members: over RELAX_MAX_NET, treated as a power rail
+    List<List<org.diylc.core.IDIYComponent<?>>> nets = List.of(List.of(a.getComponent(),
+        b.getComponent(), c.getComponent(), d.getComponent(), e.getComponent()));
+
+    Seed plain = new PlacementSeeder().seed(parts);
+    Seed relaxed = new PlacementSeeder().seed(parts, nets);
+
+    for (int i = 0; i < parts.size(); i++) {
+      assertEquals(plain.placements().get(i).reference(),
+          relaxed.placements().get(i).reference());
+    }
+  }
 }

@@ -261,40 +261,40 @@ public class LayoutCompressor implements IProjectEditor {
     }
 
     phase("Placing parts", 0.05);
-    Seed seed = new PlacementSeeder().seed(movable);
-    if (seed.placements().isEmpty()) {
+    List<List<IDIYComponent<?>>> netComponents = new ArrayList<List<IDIYComponent<?>>>();
+    for (Group net : nets) {
+      List<IDIYComponent<?>> members = new ArrayList<IDIYComponent<?>>();
+      for (Node node : net.getSortedNodes()) {
+        IDIYComponent<?> clone = toScratch.get(node.getComponent());
+        if (!members.contains(clone)) {
+          members.add(clone);
+        }
+      }
+      netComponents.add(members);
+    }
+    PlacementSeeder seeder = new PlacementSeeder();
+    Seed plainSeed = seeder.seed(movable);
+    Seed relaxedSeed = seeder.seed(movable, netComponents);
+    if (plainSeed.placements().isEmpty()) {
       throw new RuntimeException("No on-grid parts to place; nothing to compress.");
     }
 
-    // locked on-grid parts become immovable obstacles at their current (snapped) cells;
-    // off-grid parts stay entirely off the board and get flying wires
-    GridModel grid = new GridModel();
-    Map<IDIYComponent<?>, Footprint> fixedOnBoard =
-        new IdentityHashMap<IDIYComponent<?>, Footprint>();
+    // off-grid parts stay entirely off the board and get flying wires; locked off-grid too
     Set<IDIYComponent<?>> remote = new HashSet<IDIYComponent<?>>();
-    remote.addAll(seed.offGridParts());
+    remote.addAll(plainSeed.offGridParts());
+    List<Footprint> fixedOnBoard = new ArrayList<Footprint>();
     for (Footprint footprint : fixed) {
       if (footprint.isOnGrid()) {
-        fixedOnBoard.put(footprint.getComponent(), footprint);
-        for (int i = 0; i < footprint.getPinCount(); i++) {
-          int pinIndex = footprint.getPinIndices().get(i);
-          Cell cell = GridModel
-              .snap(footprint.getComponent().getControlPoint(pinIndex));
-          grid.occupyPin(cell, footprint.getComponent(), pinIndex);
-          grid.claimPadHalo(cell, footprint.getComponent(), pinIndex,
-              footprint.getPadRadiusPx(i));
-        }
+        fixedOnBoard.add(footprint);
       } else {
         remote.add(footprint.getComponent());
       }
     }
 
-    Legalizer.Result legalized = new Legalizer().legalize(seed.placements(), grid);
-
     // pin cells of the immovable on-board parts, keyed by component and control point index
     Map<IDIYComponent<?>, Map<Integer, Cell>> fixedPinCells =
         new IdentityHashMap<IDIYComponent<?>, Map<Integer, Cell>>();
-    for (Footprint footprint : fixedOnBoard.values()) {
+    for (Footprint footprint : fixedOnBoard) {
       Map<Integer, Cell> pinMap = new HashMap<Integer, Cell>();
       for (int pinIndex : footprint.getPinIndices()) {
         pinMap.put(pinIndex, GridModel.snap(footprint.getComponent().getControlPoint(pinIndex)));
@@ -313,11 +313,19 @@ public class LayoutCompressor implements IProjectEditor {
       netPins.add(pins);
     }
 
-    // route the legalized placement, then let the improvement loop compact it
+    // legalize and route both seeds — relaxation helps layouts whose nets sprawl and hurts
+    // ones the author already arranged well, so let the routed cost pick per project; the
+    // improvement loop then runs from the better start (routing costs milliseconds, the loop
+    // dominates)
     phase("Routing", 0.10);
-    CompressionState state = new CompressionState(grid, legalized.placements(), fixedPinCells,
-        netPins, ROUTING_MARGIN_CELLS);
-    state.rerouteAll();
+    CompressionState state = buildRoutedState(plainSeed, fixedOnBoard, fixedPinCells, netPins);
+    CompressionState relaxedState =
+        buildRoutedState(relaxedSeed, fixedOnBoard, fixedPinCells, netPins);
+    // marginal seed-cost advantages don't predict a better post-loop result (measured on the
+    // corpus: ~3% better seeds ended worse after annealing) — only a decisive one does
+    if (relaxedState.cost() * 10 < state.cost() * 9) {
+      state = relaxedState;
+    }
     phase("Compacting", 0.15);
     CompressionLoop loop = new CompressionLoop(state, LOOP_SEED);
     loop.setCancelMonitor(() -> cancelMonitor.getAsBoolean() || abortMonitor.getAsBoolean());
@@ -343,7 +351,7 @@ public class LayoutCompressor implements IProjectEditor {
     }
     LayoutEmitter emitter = new LayoutEmitter();
     LayoutEmitter.Emission emission = emitter.emit(scratch, placements, routing,
-        grid.occupiedBounds(), allPinCells, boardMargin);
+        state.getGrid().occupiedBounds(), allPinCells, boardMargin);
 
     // hook up remote (off-grid / locked off-grid) pins with flying wires: each pin to the
     // nearest board pin of its net (pins always carry wire endpoints, mid-run cells may not),
@@ -384,11 +392,35 @@ public class LayoutCompressor implements IProjectEditor {
               afterClassification.getRealParts()));
     }
 
-    stats = new Stats(emission.board() == null ? null : grid.occupiedBounds(), boardMargin,
+    stats = new Stats(emission.board() == null ? null : state.getGrid().occupiedBounds(),
+        boardMargin,
         nets.size(), routing.getTotalWireLength(), routing.getJumperCount(),
         routing.getJumperCrossings(), placements.size(), remote.size(), flyingWires);
     preparedFor = project;
     phase("Done", 1.0);
+  }
+
+  /**
+   * Builds a fully routed candidate state from one seed: fresh grid with the locked on-board
+   * parts as obstacles (pins + pad halos), legalized placements, all nets routed.
+   */
+  private static CompressionState buildRoutedState(Seed seed, List<Footprint> fixedOnBoard,
+      Map<IDIYComponent<?>, Map<Integer, Cell>> fixedPinCells, List<List<PinRef>> netPins) {
+    GridModel grid = new GridModel();
+    for (Footprint footprint : fixedOnBoard) {
+      for (int i = 0; i < footprint.getPinCount(); i++) {
+        int pinIndex = footprint.getPinIndices().get(i);
+        Cell cell = GridModel.snap(footprint.getComponent().getControlPoint(pinIndex));
+        grid.occupyPin(cell, footprint.getComponent(), pinIndex);
+        grid.claimPadHalo(cell, footprint.getComponent(), pinIndex,
+            footprint.getPadRadiusPx(i));
+      }
+    }
+    Legalizer.Result legalized = new Legalizer().legalize(seed.placements(), grid);
+    CompressionState state = new CompressionState(grid, legalized.placements(), fixedPinCells,
+        netPins, ROUTING_MARGIN_CELLS);
+    state.rerouteAll();
+    return state;
   }
 
   private static Cell nearestCell(Point2D pin, Iterable<Cell> candidates) {
