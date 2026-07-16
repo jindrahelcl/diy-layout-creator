@@ -23,15 +23,20 @@ package org.diylc.editor.compressor;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import java.awt.geom.Point2D;
 import java.util.Arrays;
 
 import org.diylc.components.connectivity.PCBTerminalBlock;
+import org.diylc.components.passive.PotentiometerSymbol;
 import org.diylc.components.passive.Resistor;
 import org.diylc.components.semiconductors.DIL_IC;
+import org.diylc.components.semiconductors.SymbolFlipping;
 import org.diylc.components.semiconductors.TransistorTO92;
+import org.diylc.components.transform.ThreeLegTransformer;
+import org.diylc.core.IDIYComponent;
 import org.diylc.editor.compressor.GridModel.Cell;
 import org.junit.Test;
 
@@ -176,5 +181,41 @@ public class FootprintTests {
     assertEquals(Arrays.asList(new Cell(0, 0), new Cell(-5, 0)), footprint.rotatedOffsets(2));
     assertEquals(footprint.getPinOffsets(), footprint.rotatedOffsets(4));
     assertEquals(footprint.rotatedOffsets(3), footprint.rotatedOffsets(-1));
+  }
+
+  @Test
+  public void flippedSymbolRotationMatchesItsTransformerNotPureRotationMath()
+      throws CloneNotSupportedException {
+    PotentiometerSymbol pot = new PotentiometerSymbol();
+    pot.setControlPoint(new Point2D.Double(980, 420), 0);
+    // recomputes points 1..3 from point 0; a flipped symbol's transformer applies
+    // flip-after-rotate on every turn, which is not a pure rotation of the current pins
+    pot.setFlip(SymbolFlipping.X);
+
+    Footprint footprint = Footprint.of(pot);
+    assertTrue(footprint.isOnGrid());
+    assertTrue(footprint.isRotatable());
+
+    for (int turns = 1; turns <= 3; turns++) {
+      IDIYComponent<?> rotated = pot.clone();
+      for (int t = 0; t < turns; t++) {
+        new ThreeLegTransformer().rotate(rotated, pot.getControlPoint(0), 1);
+      }
+      Point2D first = rotated.getControlPoint(0);
+      java.util.List<Cell> expected = new java.util.ArrayList<Cell>();
+      for (int i = 0; i < 3; i++) {
+        Point2D p = rotated.getControlPoint(i);
+        expected.add(new Cell((int) Math.round((p.getX() - first.getX()) / 20),
+            (int) Math.round((p.getY() - first.getY()) / 20)));
+      }
+      assertEquals(expected, footprint.rotatedOffsets(turns));
+    }
+
+    // and the transformer's answer genuinely differs from pure rotation for this part
+    java.util.List<Cell> pureRotation = new java.util.ArrayList<Cell>();
+    for (Cell c : footprint.getPinOffsets()) {
+      pureRotation.add(new Cell(-c.row(), c.col()));
+    }
+    assertNotEquals(pureRotation, footprint.rotatedOffsets(1));
   }
 }

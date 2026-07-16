@@ -58,6 +58,7 @@ public class Footprint {
   private final IDIYComponent<?> component;
   private final List<Integer> pinIndices;
   private final List<Cell> pinOffsets;
+  private final List<List<Cell>> rotatedVariants;
   private final boolean onGrid;
   private final boolean stretchable;
   private final boolean rotatable;
@@ -68,12 +69,13 @@ public class Footprint {
   private final double[] padRadiiPx;
 
   private Footprint(IDIYComponent<?> component, List<Integer> pinIndices, List<Cell> pinOffsets,
-      boolean onGrid, boolean stretchable, boolean rotatable, Rectangle bodyCells,
-      double bodyLengthCells, double bodyWidthCells, int naturalSpanCells,
+      List<List<Cell>> rotatedVariants, boolean onGrid, boolean stretchable, boolean rotatable,
+      Rectangle bodyCells, double bodyLengthCells, double bodyWidthCells, int naturalSpanCells,
       double[] padRadiiPx) {
     this.component = component;
     this.pinIndices = pinIndices;
     this.pinOffsets = pinOffsets;
+    this.rotatedVariants = rotatedVariants;
     this.onGrid = onGrid;
     this.stretchable = stretchable;
     this.rotatable = rotatable;
@@ -161,6 +163,18 @@ public class Footprint {
 
     boolean rotatable = stretchable || hasRotationTransformer(component);
 
+    // fixed rotatable parts: ask the actual transformer where the pins land per quarter turn.
+    // Transformers are not always pure rotations — flipped symbols recompute their points as
+    // flip-after-rotate, which lands pins elsewhere than rotation math predicts. If the
+    // transformer's answer doesn't fit the lattice, the part isn't rotatable for us.
+    List<List<Cell>> rotatedVariants = null;
+    if (rotatable && !stretchable && onGrid && !pinOffsets.isEmpty()) {
+      rotatedVariants = probeRotations(component, pinIndices, pinOffsets);
+      if (rotatedVariants == null) {
+        rotatable = false;
+      }
+    }
+
     double[] pinPadRadii = new double[pinIndices.size()];
     if (padRadiiPx != null) {
       for (int i = 0; i < pinIndices.size(); i++) {
@@ -170,8 +184,49 @@ public class Footprint {
     }
 
     return new Footprint(component, Collections.unmodifiableList(pinIndices),
-        Collections.unmodifiableList(pinOffsets), onGrid, stretchable, rotatable, bodyCells,
-        bodyLengthCells, bodyWidthCells, naturalSpanCells, pinPadRadii);
+        Collections.unmodifiableList(pinOffsets), rotatedVariants, onGrid, stretchable,
+        rotatable, bodyCells, bodyLengthCells, bodyWidthCells, naturalSpanCells, pinPadRadii);
+  }
+
+  /**
+   * Rotates a clone of the component with its type's transformer, one clockwise quarter turn
+   * at a time (exactly what {@link LayoutEmitter} does when applying a placement), and records
+   * the sticky pin offsets after each turn. Returns the four variants (index = quarter turns),
+   * or null when any variant leaves the lattice or the probe fails.
+   */
+  @SuppressWarnings("unchecked")
+  private static List<List<Cell>> probeRotations(IDIYComponent<?> component,
+      List<Integer> pinIndices, List<Cell> baseOffsets) {
+    try {
+      ComponentType type = ComponentProcessor.getInstance()
+          .extractComponentTypeFrom((Class<? extends IDIYComponent<?>>) component.getClass());
+      IDIYComponent<?> probe = component.clone();
+      Point2D pin0 = component.getControlPoint(pinIndices.get(0));
+      Point2D center = new Point2D.Double(pin0.getX(), pin0.getY());
+      List<List<Cell>> variants = new ArrayList<List<Cell>>(4);
+      variants.add(baseOffsets);
+      for (int turns = 1; turns < 4; turns++) {
+        type.getTransformer().rotate(probe, center, 1);
+        List<Cell> offsets = new ArrayList<Cell>(pinIndices.size());
+        Point2D first = probe.getControlPoint(pinIndices.get(0));
+        for (int index : pinIndices) {
+          Point2D p = probe.getControlPoint(index);
+          double dx = p.getX() - first.getX();
+          double dy = p.getY() - first.getY();
+          long col = Math.round(dx / GridModel.CELL_SIZE_PX);
+          long row = Math.round(dy / GridModel.CELL_SIZE_PX);
+          if (Math.abs(dx - col * GridModel.CELL_SIZE_PX) > GridModel.SNAP_TOLERANCE_PX
+              || Math.abs(dy - row * GridModel.CELL_SIZE_PX) > GridModel.SNAP_TOLERANCE_PX) {
+            return null;
+          }
+          offsets.add(new Cell((int) col, (int) row));
+        }
+        variants.add(Collections.unmodifiableList(offsets));
+      }
+      return variants;
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private static Rectangle2D bodyShapeBounds(IDIYComponent<?> component) {
@@ -250,9 +305,16 @@ public class Footprint {
     return new Rectangle(minCol, minRow, maxCol - minCol, maxRow - minRow);
   }
 
-  /** Pin offsets rotated by the given number of 90-degree clockwise turns. */
+  /**
+   * Pin offsets after the given number of 90-degree clockwise turns — the transformer-probed
+   * positions when available (transformers of flipped symbols are not pure rotations), pure
+   * rotation math otherwise.
+   */
   public List<Cell> rotatedOffsets(int quarterTurns) {
     int turns = ((quarterTurns % 4) + 4) % 4;
+    if (rotatedVariants != null) {
+      return rotatedVariants.get(turns);
+    }
     List<Cell> result = new ArrayList<Cell>(pinOffsets);
     for (int t = 0; t < turns; t++) {
       List<Cell> rotated = new ArrayList<Cell>(result.size());
