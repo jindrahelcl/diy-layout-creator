@@ -35,18 +35,19 @@ Engine (all logic, no UI) — `diylc/diylc-library/src/main/java/org/diylc/edito
 | `CompressionLoop` | Seeded simulated-annealing loop (`run`) plus a deterministic greedy squeeze (`compact`). |
 | `LayoutEmitter` | Writes placements back to components; emits traces/jumpers/PerfBoard. |
 | `ContinuityScanner` | Headless draw pass to recompute continuity areas for verification. |
-| `CompressionSurvey` | M0/M1 stats for the preview dialog; not part of the compress pipeline. |
+| `CompressionSurvey` | M0/M1 layout stats; the preview menu item that showed them is gone, so only its tests use it now. |
 
 UI — `diylc/diylc-swing/src/main/java/org/diylc/swing/plugins/compressor/`: menu plugin +
-`CompressAction` ("Edit → Compress Layout"), which runs `LayoutCompressor.prepare(...)` in a
-background task behind `CompressDialog` — one `JDialog` that flows through three content-pane
-states: `showParams` (time budget/margin spinners feeding `LayoutCompressor.setLoopTimeBudget`/
-`setBoardMargin`; Compress starts the run, Cancel/close backs out), `showProgress` (phase label
-+ progress bar; **Finish Now** stops the loop keeping the best state, **Cancel**/close aborts
-via the abort monitor — `CancelledException`, project untouched), and `showReport` (result
-summary in the same window, replacing the old `showMessage` popup; it reads the margin actually
-used from `Stats.boardMargin()`). The verified result commits via `plugInPort.applyEditor(...)`
-on the EDT before the report shows. Registered with 2 lines in `MainFrame.java`. The only other
+`CompressAction` ("Edit → Compress Layout", the only menu item — the survey preview item was
+dropped), which runs `LayoutCompressor.prepare(...)` in a background task behind
+`CompressDialog` — one `JDialog` that flows through three content-pane states: `showParams`
+(time budget spinner feeding `LayoutCompressor.setLoopTimeBudget`; Compress starts the run,
+Cancel/close backs out), `showProgress` (phase label + progress bar; **Finish Now** stops the
+loop keeping the best state, **Cancel**/close aborts via the abort monitor —
+`CancelledException`, project untouched), and `showReport` (result summary in the same window,
+replacing the old `showMessage` popup). The verified result commits via
+`plugInPort.applyEditor(...)` on the EDT before the report shows; the edit returns an empty
+selection so nothing is left selected. Registered with 2 lines in `MainFrame.java`. The only other
 upstream touches: ~11 lines in `NetlistBuilder.java`, the public `getBodyShapeBounds()`
 accessor on `AbstractLeadedComponent` (body geometry for footprints), and 4 lines in
 `Presenter.applyEditor` purging `componentAreaMap` + `DrawingCache` — without them, components
@@ -377,9 +378,11 @@ LM386 23×25→20×25, Rix Pro Jr 60×34→60×33, Synth jumpers 79→72.
 params → progress → report in one window; `CompressAction` opens on the params screen and only
 starts the run on "Compress". The board-margin option was built and then dropped after user
 testing (the board is trivially resizable after the fact); the emitter keeps the 1-cell
-default. Wire colors/styles were deliberately dropped from scope for the same reason. GUI
-testing also caught the ghost-highlight bug fixed in `Presenter.applyEditor` (see the upstream
-touches note in "Where things live").
+default. Wire colors/styles were deliberately dropped from scope for the same reason. The GUI
+test round also brought: the ghost-highlight fix in `Presenter.applyEditor` (see the upstream
+touches note in "Where things live"), dropping the "Compress Layout (Preview)" menu item
+(survey stats stay engine-side, test-only), and `edit` returning an empty selection so the
+emitted wiring isn't left selected after compression.
 
 **Corpus sweep: done** (2026-07-16, headless CompressTool over all 34 regression files).
 First pass: 20 ok / 13 gate-failures / 1 graceful no-op. Two root causes found and fixed:
