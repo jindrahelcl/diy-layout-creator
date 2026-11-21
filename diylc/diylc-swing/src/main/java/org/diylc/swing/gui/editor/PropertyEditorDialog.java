@@ -171,6 +171,8 @@ public class PropertyEditorDialog extends ButtonDialog {
           @Override
           public void keyPressed(KeyEvent e) {
             if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+              // OK is also the root pane's default button, which would validate a second time
+              e.consume();
               getButton(OK).doClick();
             }
           }

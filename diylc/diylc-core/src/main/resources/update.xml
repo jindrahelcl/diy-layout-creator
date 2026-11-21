@@ -650,6 +650,10 @@
 					<description>Added 'Via' to the Connectivity category, a plated hole that takes a trace from one copper layer to the other: it joins the top and bottom copper in netlists and 'Highlight Connected Areas', and Gerber export writes it to both copper layers and the plated drill file, covered by the solder mask</description>
 				</org.diylc.appframework.update.Change>
 				<org.diylc.appframework.update.Change>
+					<changeType>NEW_FEATURE</changeType>
+					<description>Added 'RGB LED' to the Semiconductors category, a 4-lead clear RGB LED with flexible leads, common anode or cathode, and a top or side view</description>
+				</org.diylc.appframework.update.Change>
+				<org.diylc.appframework.update.Change>
 					<changeType>IMPROVEMENT</changeType>
 					<description>Boards are now drawn the way they really are, so it is clear at a glance which side you are looking at: the main view shows the component side, with strips, pads, traces and other copper on the bottom of the board showing through it faded, and the Underside Display shows the solder side, with the copper solid and the parts mounted on top faded behind the board. Holes and trace cuts go through the board and stay clear from both sides. A board's 'Underside Transparency' now fades only the parts on the far side, and turning it off draws the Underside Display fully solid</description>
 				</org.diylc.appframework.update.Change>
@@ -700,6 +704,10 @@
 				<org.diylc.appframework.update.Change>
 					<changeType>BUG_FIX</changeType>
 					<description>'Drill Hole' added its outline and crosshair to the drill file in Gerber export</description>
+				</org.diylc.appframework.update.Change>
+				<org.diylc.appframework.update.Change>
+					<changeType>BUG_FIX</changeType>
+					<description>Pressing Enter on an invalid value in the property editor showed the error message twice</description>
 				</org.diylc.appframework.update.Change>
 			</changes>
 			<url>https://github.com/bancika/diy-layout-creator/releases</url>
